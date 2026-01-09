@@ -22,6 +22,7 @@
 // the `immutable_query` parameter in cozo_run_query. The official cozo-lib-go
 // v0.7.5 does not support this parameter, causing undefined behavior with
 // newer libcozo_c versions.
+
 package cozodb
 
 /*

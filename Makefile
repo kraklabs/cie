@@ -1,3 +1,6 @@
+# Copyright 2025 KrakLabs
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # CIE - Code Intelligence Engine
 # Makefile for build, test, and development automation
 

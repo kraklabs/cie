@@ -204,6 +204,13 @@ This model allows us to:
 - Sustainably fund development through commercial licensing
 - Enable enterprise adoption without legal concerns
 
+### Third-Party Components
+
+CIE includes some third-party components with their own licenses:
+- **CozoDB C Headers** (MPL 2.0) - See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for details
+
+These components are compatible with AGPL v3 and retain their original licenses.
+
 ## Related Projects
 
 - [CozoDB](https://github.com/cozodb/cozo) - The embedded database powering CIE

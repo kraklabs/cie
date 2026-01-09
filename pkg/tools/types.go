@@ -16,6 +16,7 @@
 // For commercial licensing, contact: licensing@kraklabs.com
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
+
 package tools
 
 import "strings"
