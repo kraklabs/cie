@@ -1,0 +1,194 @@
+// Copyright 2025 KrakLabs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// SPDX-License-Identifier: Apache-2.0
+
+package ingestion
+
+import (
+	"sync"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
+
+// metricsIngestion holds Prometheus metrics for the ingestion subsystem.
+type metricsIngestion struct {
+	once sync.Once
+
+	// Delta
+	deltaAdded    prometheus.Counter
+	deltaModified prometheus.Counter
+	deltaDeleted  prometheus.Counter
+	deltaRenamed  prometheus.Counter
+
+	// Delta (post-filter)
+	deltaFilteredAdded    prometheus.Counter
+	deltaFilteredModified prometheus.Counter
+	deltaFilteredDeleted  prometheus.Counter
+	deltaFilteredRenamed  prometheus.Counter
+
+	// Functions/Embeddings
+	funcsAdded    prometheus.Counter
+	funcsModified prometheus.Counter
+	funcsRemoved  prometheus.Counter
+	embedComputed prometheus.Counter
+	embedSkipped  prometheus.Counter
+	embedErrors   prometheus.Counter
+	embedRetries  prometheus.Counter
+
+	// Batches
+	batchesSent prometheus.Counter
+
+	// Defensive cleanups
+	pathSweeps      prometheus.Counter
+	edgesOnlySweeps prometheus.Counter
+
+	// Durations
+	deltaDuration prometheus.Histogram
+	parseDuration prometheus.Histogram
+	embedDuration prometheus.Histogram
+	writeDuration prometheus.Histogram
+	totalDuration prometheus.Histogram
+}
+
+var ingMetrics metricsIngestion
+
+func (m *metricsIngestion) init() {
+	m.once.Do(func() {
+		m.deltaAdded = prometheus.NewCounter(prometheus.CounterOpts{Name: "cie_ing_delta_added_total", Help: "Archivos añadidos detectados por delta"})
+		m.deltaModified = prometheus.NewCounter(prometheus.CounterOpts{Name: "cie_ing_delta_modified_total", Help: "Archivos modificados detectados por delta"})
+		m.deltaDeleted = prometheus.NewCounter(prometheus.CounterOpts{Name: "cie_ing_delta_deleted_total", Help: "Archivos eliminados detectados por delta"})
+		m.deltaRenamed = prometheus.NewCounter(prometheus.CounterOpts{Name: "cie_ing_delta_renamed_total", Help: "Renames detectados por delta"})
+
+		m.deltaFilteredAdded = prometheus.NewCounter(prometheus.CounterOpts{Name: "cie_ing_delta_filtered_added_total", Help: "Archivos añadidos tras filtros"})
+		m.deltaFilteredModified = prometheus.NewCounter(prometheus.CounterOpts{Name: "cie_ing_delta_filtered_modified_total", Help: "Archivos modificados tras filtros"})
+		m.deltaFilteredDeleted = prometheus.NewCounter(prometheus.CounterOpts{Name: "cie_ing_delta_filtered_deleted_total", Help: "Archivos eliminados tras filtros"})
+		m.deltaFilteredRenamed = prometheus.NewCounter(prometheus.CounterOpts{Name: "cie_ing_delta_filtered_renamed_total", Help: "Renames tras filtros"})
+
+		m.funcsAdded = prometheus.NewCounter(prometheus.CounterOpts{Name: "cie_ing_functions_added_total", Help: "Funciones añadidas"})
+		m.funcsModified = prometheus.NewCounter(prometheus.CounterOpts{Name: "cie_ing_functions_modified_total", Help: "Funciones modificadas"})
+		m.funcsRemoved = prometheus.NewCounter(prometheus.CounterOpts{Name: "cie_ing_functions_removed_total", Help: "Funciones removidas"})
+
+		m.embedComputed = prometheus.NewCounter(prometheus.CounterOpts{Name: "cie_ing_embeddings_computed_total", Help: "Embeddings calculados"})
+		m.embedSkipped = prometheus.NewCounter(prometheus.CounterOpts{Name: "cie_ing_embeddings_skipped_total", Help: "Embeddings reutilizados/caché"})
+		m.embedErrors = prometheus.NewCounter(prometheus.CounterOpts{Name: "cie_ing_embeddings_errors_total", Help: "Errores de proveedor de embeddings"})
+		m.embedRetries = prometheus.NewCounter(prometheus.CounterOpts{Name: "cie_ing_embeddings_retries_total", Help: "Reintentos de embeddings"})
+
+		m.batchesSent = prometheus.NewCounter(prometheus.CounterOpts{Name: "cie_ing_batches_sent_total", Help: "Batches enviados a Primary"})
+
+		m.pathSweeps = prometheus.NewCounter(prometheus.CounterOpts{Name: "cie_ing_path_sweeps_total", Help: "Limpiezas defensivas por ruta (rm_*_by_*_path)"})
+		m.edgesOnlySweeps = prometheus.NewCounter(prometheus.CounterOpts{Name: "cie_ing_edges_only_sweeps_total", Help: "Limpiezas de solo edges por ruta (modificados sin manifest)"})
+
+		buckets := []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10}
+		m.deltaDuration = prometheus.NewHistogram(prometheus.HistogramOpts{Name: "cie_ing_delta_seconds", Help: "Duración de detección de delta", Buckets: buckets})
+		m.parseDuration = prometheus.NewHistogram(prometheus.HistogramOpts{Name: "cie_ing_parse_seconds", Help: "Duración de parseo", Buckets: buckets})
+		m.embedDuration = prometheus.NewHistogram(prometheus.HistogramOpts{Name: "cie_ing_embed_seconds", Help: "Duración de embeddings", Buckets: buckets})
+		m.writeDuration = prometheus.NewHistogram(prometheus.HistogramOpts{Name: "cie_ing_write_seconds", Help: "Duración de escrituras", Buckets: buckets})
+		m.totalDuration = prometheus.NewHistogram(prometheus.HistogramOpts{Name: "cie_ing_total_seconds", Help: "Duración total de la ejecución", Buckets: buckets})
+
+		prometheus.MustRegister(
+			m.deltaAdded, m.deltaModified, m.deltaDeleted, m.deltaRenamed,
+			m.deltaFilteredAdded, m.deltaFilteredModified, m.deltaFilteredDeleted, m.deltaFilteredRenamed,
+			m.funcsAdded, m.funcsModified, m.funcsRemoved,
+			m.embedComputed, m.embedSkipped, m.embedErrors, m.embedRetries,
+			m.batchesSent,
+			m.pathSweeps, m.edgesOnlySweeps,
+			m.deltaDuration, m.parseDuration, m.embedDuration, m.writeDuration, m.totalDuration,
+		)
+	})
+}
+
+// record helpers
+func recordDeltaStats(added, modified, deleted, renamed int) {
+	ingMetrics.init()
+	if added > 0 {
+		ingMetrics.deltaAdded.Add(float64(added))
+	}
+	if modified > 0 {
+		ingMetrics.deltaModified.Add(float64(modified))
+	}
+	if deleted > 0 {
+		ingMetrics.deltaDeleted.Add(float64(deleted))
+	}
+	if renamed > 0 {
+		ingMetrics.deltaRenamed.Add(float64(renamed))
+	}
+}
+
+func recordFilteredDeltaStats(added, modified, deleted, renamed int) {
+	ingMetrics.init()
+	if added > 0 {
+		ingMetrics.deltaFilteredAdded.Add(float64(added))
+	}
+	if modified > 0 {
+		ingMetrics.deltaFilteredModified.Add(float64(modified))
+	}
+	if deleted > 0 {
+		ingMetrics.deltaFilteredDeleted.Add(float64(deleted))
+	}
+	if renamed > 0 {
+		ingMetrics.deltaFilteredRenamed.Add(float64(renamed))
+	}
+}
+
+func recordFunctionsStats(added, modified, removed int) {
+	ingMetrics.init()
+	if added > 0 {
+		ingMetrics.funcsAdded.Add(float64(added))
+	}
+	if modified > 0 {
+		ingMetrics.funcsModified.Add(float64(modified))
+	}
+	if removed > 0 {
+		ingMetrics.funcsRemoved.Add(float64(removed))
+	}
+}
+
+func recordEmbedComputed(n int) {
+	ingMetrics.init()
+	if n > 0 {
+		ingMetrics.embedComputed.Add(float64(n))
+	}
+}
+func recordEmbedSkipped(n int) {
+	ingMetrics.init()
+	if n > 0 {
+		ingMetrics.embedSkipped.Add(float64(n))
+	}
+}
+func recordEmbedErrors(n int) {
+	ingMetrics.init()
+	if n > 0 {
+		ingMetrics.embedErrors.Add(float64(n))
+	}
+}
+func recordEmbedRetry() { ingMetrics.init(); ingMetrics.embedRetries.Inc() }
+func recordBatchSent()  { ingMetrics.init(); ingMetrics.batchesSent.Inc() }
+func recordPathSweepCount(n int) {
+	ingMetrics.init()
+	if n > 0 {
+		ingMetrics.pathSweeps.Add(float64(n))
+	}
+}
+func recordEdgesOnlySweepCount(n int) {
+	ingMetrics.init()
+	if n > 0 {
+		ingMetrics.edgesOnlySweeps.Add(float64(n))
+	}
+}
+func observeDeltaSeconds(v float64) { ingMetrics.init(); ingMetrics.deltaDuration.Observe(v) }
+func observeParseSeconds(v float64) { ingMetrics.init(); ingMetrics.parseDuration.Observe(v) }
+func observeEmbedSeconds(v float64) { ingMetrics.init(); ingMetrics.embedDuration.Observe(v) }
+func observeWriteSeconds(v float64) { ingMetrics.init(); ingMetrics.writeDuration.Observe(v) }
+func observeTotalSeconds(v float64) { ingMetrics.init(); ingMetrics.totalDuration.Observe(v) }
