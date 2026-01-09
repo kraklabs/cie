@@ -1,5 +1,5 @@
 // Copyright 2025 KrakLabs
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package contract provides validation constants and utilities for CIE.
 // This is a minimal subset for standalone operation.

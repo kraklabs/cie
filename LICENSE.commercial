@@ -1,0 +1,116 @@
+# Commercial License for CIE
+
+CIE is available under a dual-licensing model:
+
+1. **AGPL v3 (Open Source License)** - Free for everyone
+2. **Commercial License** - For organizations that cannot comply with AGPL v3
+
+---
+
+## When Do You Need a Commercial License?
+
+You need a commercial license if:
+
+- ✓ You want to use CIE in a proprietary/closed-source product
+- ✓ You want to offer CIE as a managed service without releasing your code
+- ✓ Your organization's policies prohibit AGPL-licensed software
+- ✓ You want to modify CIE without releasing your modifications
+
+## What Does the Commercial License Include?
+
+- Full rights to use, modify, and distribute CIE
+- No obligation to release your source code
+- No copyleft requirements
+- Priority technical support (optional add-on)
+- Commercial indemnification (optional add-on)
+- Flexible licensing terms for your use case
+
+## Pricing
+
+Commercial licensing is available on a per-project or enterprise-wide basis.
+
+**Contact us for pricing:**
+- Email: licensing@kraklabs.com
+- Website: https://kraklabs.com/cie/licensing
+
+We offer:
+- **Startup plans** - Discounted rates for companies < 50 employees
+- **Project licenses** - For specific projects or products
+- **Enterprise licenses** - Unlimited use across your organization
+- **OEM licenses** - For embedding CIE in your products
+
+## Comparison: AGPL vs Commercial
+
+| Feature | AGPL v3 (Free) | Commercial License |
+|---------|----------------|-------------------|
+| Cost | Free | Paid |
+| Use in open source projects | ✓ Yes | ✓ Yes |
+| Use in closed source products | Only if you release your code | ✓ Yes |
+| Modify the code | ✓ Yes | ✓ Yes |
+| Must release modifications | ✓ Yes, if distributed or offered as service | ✗ No |
+| Offer as SaaS/managed service | ✓ Yes, but must release code | ✓ Yes, keep your code private |
+| Technical support | Community | Priority (optional) |
+| Indemnification | No | Optional |
+
+## Dual Licensing Model
+
+CIE follows a **dual licensing model**, similar to:
+- MySQL
+- Qt Framework
+- Sentry
+- MongoDB (historically)
+
+This means:
+1. The **same codebase** is available under both licenses
+2. You choose which license fits your needs
+3. Open source projects benefit from AGPL's community-driven development
+4. Commercial users get flexibility without copyleft obligations
+
+## Why AGPL v3 for Open Source?
+
+We chose AGPL v3 to:
+- Ensure improvements benefit the entire community
+- Prevent "cloud provider lock-in" where companies profit without contributing
+- Maintain a vibrant, collaborative open source ecosystem
+- Give back to the community that builds CIE
+
+## Why Offer Commercial Licensing?
+
+We offer commercial licensing to:
+- Support development of CIE through sustainable funding
+- Enable enterprise adoption without legal concerns
+- Provide priority support and guarantees for mission-critical deployments
+- Allow proprietary use cases that benefit from CIE's capabilities
+
+## FAQ
+
+**Q: Can I use CIE for free in my startup?**
+A: Yes! If you're building an open source product or can comply with AGPL v3 (releasing your code), it's completely free.
+
+**Q: What if I'm not sure if I need a commercial license?**
+A: Contact us at licensing@kraklabs.com - we'll help you understand your options.
+
+**Q: Can I try before buying?**
+A: Yes! Use the AGPL version for evaluation. If you need commercial licensing, contact us.
+
+**Q: Do you offer non-profit discounts?**
+A: Yes! Contact us to discuss non-profit and educational pricing.
+
+**Q: What if I want to contribute code back?**
+A: Contributions are welcome under either license! See CONTRIBUTING.md for details.
+
+**Q: Can I buy a license retroactively?**
+A: Yes, we can work with you on retroactive licensing if needed.
+
+---
+
+## Get Started
+
+1. **Open Source Use**: Clone the repo and start building! Read LICENSE for AGPL v3 terms.
+2. **Commercial Use**: Email licensing@kraklabs.com with your use case.
+
+---
+
+**KrakLabs**
+Email: licensing@kraklabs.com
+Web: https://kraklabs.com

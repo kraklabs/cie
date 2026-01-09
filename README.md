@@ -170,7 +170,39 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## License
 
-Apache License 2.0 - see [LICENSE](LICENSE) for details.
+CIE is dual-licensed:
+
+### Open Source License (AGPL v3)
+
+CIE is free and open source under the **GNU Affero General Public License v3.0** (AGPL v3).
+
+**Use CIE for free if:**
+- You're building open source software
+- You can release your modifications under AGPL v3
+- You're okay with the copyleft requirements
+
+See [LICENSE](LICENSE) for full AGPL v3 terms.
+
+### Commercial License
+
+Need to use CIE in a closed-source product or service? We offer commercial licenses that remove AGPL requirements.
+
+**Commercial licensing is right for you if:**
+- You want to use CIE in a proprietary product
+- You want to offer CIE as a managed service without releasing your code
+- Your organization's policies prohibit AGPL-licensed software
+- You want to modify CIE without releasing your modifications
+
+**Pricing:** Contact licensing@kraklabs.com for details.
+
+See [LICENSE.commercial](LICENSE.commercial) for more information.
+
+**Why dual licensing?**
+This model allows us to:
+- Keep CIE free for the open source community
+- Ensure improvements benefit everyone through AGPL's copyleft
+- Sustainably fund development through commercial licensing
+- Enable enterprise adoption without legal concerns
 
 ## Related Projects
 
