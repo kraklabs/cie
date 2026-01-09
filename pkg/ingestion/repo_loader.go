@@ -78,20 +78,40 @@ func (rl *RepoLoader) Close() error {
 
 // LoadResult contains the loaded repository information.
 type LoadResult struct {
-	RootPath    string // Absolute path to repository root
-	Files       []FileInfo
-	FileCount   int
-	TotalSize   int64
-	Languages   map[string]int // Language -> file count
-	SkipReasons map[string]int // Reason -> count (e.g., "excluded", "too_large", "unsupported_language")
+	// RootPath is the absolute path to the repository root directory.
+	RootPath string
+
+	// Files contains metadata for all discovered source files.
+	Files []FileInfo
+
+	// FileCount is the total number of source files found.
+	FileCount int
+
+	// TotalSize is the sum of all file sizes in bytes.
+	TotalSize int64
+
+	// Languages maps language names to file counts (e.g., "go": 15, "python": 8).
+	Languages map[string]int
+
+	// SkipReasons maps skip reasons to counts (e.g., "excluded": 10, "too_large": 2).
+	// Common reasons: "excluded" (matched exclude glob), "too_large" (exceeds size limit),
+	// "unsupported_language" (no parser available), "binary" (not text).
+	SkipReasons map[string]int
 }
 
 // FileInfo represents a file in the repository.
 type FileInfo struct {
-	Path     string // Relative path from repo root
-	FullPath string // Absolute path
-	Size     int64
-	Language string // Detected from extension
+	// Path is the relative path from the repository root (e.g., "pkg/handlers/auth.go").
+	Path string
+
+	// FullPath is the absolute filesystem path.
+	FullPath string
+
+	// Size is the file size in bytes.
+	Size int64
+
+	// Language is the detected language from file extension (e.g., "go", "python", "javascript").
+	Language string
 }
 
 // LoadRepository loads a repository from the specified source.

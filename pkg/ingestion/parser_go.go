@@ -56,8 +56,18 @@ type goParseResult struct {
 	PackageName     string
 }
 
-// parseGoAST extracts functions from Go source using Tree-sitter.
-// This is the primary parser for the codebase.
+// parseGoAST extracts functions, types, and call relationships from Go source using Tree-sitter.
+//
+// Extracts:
+//   - Functions (func declarations)
+//   - Methods (func with receivers)
+//   - Function literals / closures
+//   - Types (structs, interfaces)
+//   - Function calls within the file
+//   - Unresolved calls (for cross-package resolution)
+//   - Package name
+//
+// This is the primary parser for Go code, providing the most accurate results.
 func (p *TreeSitterParser) parseGoAST(content []byte, filePath string) (*goParseResult, error) {
 	tree, err := p.goParser.ParseCtx(context.Background(), nil, content)
 	if err != nil {

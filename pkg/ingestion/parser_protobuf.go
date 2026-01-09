@@ -27,8 +27,18 @@ import (
 // PROTOBUF PARSER (simplified, no tree-sitter)
 // =============================================================================
 
-// parseProtobufContent extracts services, RPCs, and messages from .proto files.
+// parseProtobufContent extracts services, RPC methods, and messages from .proto files.
+//
+// Extracts:
+//   - Services (service definitions)
+//   - RPC methods (rpc declarations with request/response types)
+//   - Message types (as TypeEntity)
+//
 // Uses regex-based parsing since tree-sitter-proto is not bundled.
+// RPC methods are represented as FunctionEntity with signatures like:
+//
+//	"rpc MethodName(RequestType) returns (ResponseType)"
+//
 // This is a shared implementation used by both Parser and TreeSitterParser.
 func parseProtobufContent(content string, filePath string, truncateFunc func(string) string) ([]FunctionEntity, []CallsEdge) {
 	var functions []FunctionEntity

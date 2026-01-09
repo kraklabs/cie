@@ -90,15 +90,34 @@ func (p *Parser) truncateCodeText(codeText string) string {
 
 // ParseResult contains extracted entities from a file.
 type ParseResult struct {
-	File            FileEntity
-	Functions       []FunctionEntity
-	Types           []TypeEntity // Types/interfaces/classes/structs
-	Defines         []DefinesEdge
-	DefinesTypes    []DefinesTypeEdge // File -> Type edges
-	Calls           []CallsEdge
-	Imports         []ImportEntity   // Go imports for cross-package resolution
-	UnresolvedCalls []UnresolvedCall // Calls that couldn't be resolved in same file
-	PackageName     string           // Go package name (e.g., "handlers")
+	// File is the file entity containing metadata (path, hash, language, size).
+	File FileEntity
+
+	// Functions contains all functions/methods extracted from the file.
+	Functions []FunctionEntity
+
+	// Types contains all types/interfaces/classes/structs extracted from the file.
+	Types []TypeEntity
+
+	// Defines contains edges connecting the file to its functions.
+	Defines []DefinesEdge
+
+	// DefinesTypes contains edges connecting the file to its types.
+	DefinesTypes []DefinesTypeEdge
+
+	// Calls contains function-to-function call relationships discovered within the file.
+	Calls []CallsEdge
+
+	// Imports contains import statements for cross-package resolution (Go-specific).
+	Imports []ImportEntity
+
+	// UnresolvedCalls contains function calls that couldn't be resolved within the file.
+	// These will be resolved later during cross-package call resolution.
+	UnresolvedCalls []UnresolvedCall
+
+	// PackageName is the package name for Go files (e.g., "handlers", "main").
+	// Empty for other languages.
+	PackageName string
 }
 
 // ParseFile parses a source file and extracts functions.

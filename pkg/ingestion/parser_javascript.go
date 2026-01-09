@@ -31,7 +31,18 @@ import (
 // JAVASCRIPT PARSER
 // =============================================================================
 
-// parseJavaScriptAST extracts functions and types from JavaScript source using Tree-sitter.
+// parseJavaScriptAST extracts functions, classes, and call relationships from JavaScript source using Tree-sitter.
+//
+// Extracts:
+//   - Function declarations (function foo() {})
+//   - Arrow functions (const foo = () => {})
+//   - Function expressions (const foo = function() {})
+//   - Classes (class Foo {})
+//   - Methods (within classes)
+//   - Async functions
+//   - Function calls within the file
+//
+// Handles ES6+ syntax including arrow functions and class methods.
 func (p *TreeSitterParser) parseJavaScriptAST(content []byte, filePath string) ([]FunctionEntity, []TypeEntity, []CallsEdge, error) {
 	tree, err := p.jsParser.ParseCtx(context.Background(), nil, content)
 	if err != nil {

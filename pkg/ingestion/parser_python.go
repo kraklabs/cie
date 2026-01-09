@@ -31,7 +31,16 @@ import (
 // PYTHON PARSER
 // =============================================================================
 
-// parsePythonAST extracts functions and types from Python source using Tree-sitter.
+// parsePythonAST extracts functions, classes, methods, and call relationships from Python source using Tree-sitter.
+//
+// Extracts:
+//   - Functions (def statements)
+//   - Classes (class definitions)
+//   - Methods (functions within classes, with class prefix)
+//   - Lambda functions (anonymous functions)
+//   - Function calls within the file
+//
+// Method names are prefixed with class name (e.g., "ClassName.method_name").
 func (p *TreeSitterParser) parsePythonAST(content []byte, filePath string) ([]FunctionEntity, []TypeEntity, []CallsEdge, error) {
 	tree, err := p.pyParser.ParseCtx(context.Background(), nil, content)
 	if err != nil {

@@ -30,7 +30,20 @@ import (
 // TYPESCRIPT PARSER
 // =============================================================================
 
-// parseTypeScriptAST extracts functions and types from TypeScript source using Tree-sitter.
+// parseTypeScriptAST extracts functions, classes, interfaces, and call relationships from TypeScript source using Tree-sitter.
+//
+// Extracts:
+//   - Function declarations (function foo() {})
+//   - Arrow functions (const foo = () => {})
+//   - Function expressions (const foo = function() {})
+//   - Classes (class Foo {})
+//   - Interfaces (interface Bar {})
+//   - Type aliases (type Baz = ...)
+//   - Methods (within classes)
+//   - Async functions
+//   - Function calls within the file
+//
+// Handles TypeScript-specific syntax including interfaces and type aliases.
 func (p *TreeSitterParser) parseTypeScriptAST(content []byte, filePath string) ([]FunctionEntity, []TypeEntity, []CallsEdge, error) {
 	tree, err := p.tsParser.ParseCtx(context.Background(), nil, content)
 	if err != nil {

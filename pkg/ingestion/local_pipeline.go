@@ -48,25 +48,62 @@ type LocalPipeline struct {
 
 // IngestionResult summarizes the ingestion run.
 type IngestionResult struct {
-	ProjectID          string
-	RunID              string
-	FilesProcessed     int
+	// ProjectID is the unique identifier for the indexed project.
+	ProjectID string
+
+	// RunID is the unique identifier for this ingestion run (UUID).
+	RunID string
+
+	// FilesProcessed is the total number of source files successfully parsed.
+	FilesProcessed int
+
+	// FunctionsExtracted is the total number of functions/methods discovered.
 	FunctionsExtracted int
-	TypesExtracted     int
-	DefinesEdges       int
-	CallsEdges         int
-	EntitiesSent       int
-	EntitiesRetried    int
+
+	// TypesExtracted is the total number of types/classes/interfaces discovered.
+	TypesExtracted int
+
+	// DefinesEdges is the number of file-to-function relationships created.
+	DefinesEdges int
+
+	// CallsEdges is the number of function-to-function call relationships created.
+	CallsEdges int
+
+	// EntitiesSent is the total number of entities written to storage.
+	EntitiesSent int
+
+	// EntitiesRetried is the number of entities that required retry due to transient failures.
+	EntitiesRetried int
+
+	// LastCommittedIndex is the replication log index of the last committed write.
 	LastCommittedIndex uint64
-	ParseErrors        int
-	ParseErrorRate     float64
-	EmbeddingErrors    int
-	CodeTextTruncated  int
-	TopSkipReasons     map[string]int
-	ParseDuration      time.Duration
-	EmbedDuration      time.Duration
-	WriteDuration      time.Duration
-	TotalDuration      time.Duration
+
+	// ParseErrors is the number of files that failed to parse.
+	ParseErrors int
+
+	// ParseErrorRate is the percentage of files that failed (0.0-1.0).
+	ParseErrorRate float64
+
+	// EmbeddingErrors is the number of functions/types that failed embedding generation.
+	EmbeddingErrors int
+
+	// CodeTextTruncated is the number of functions whose code was truncated due to size limits.
+	CodeTextTruncated int
+
+	// TopSkipReasons maps skip reasons to counts (e.g., "too_large": 5, "binary": 2).
+	TopSkipReasons map[string]int
+
+	// ParseDuration is the time spent parsing source files.
+	ParseDuration time.Duration
+
+	// EmbedDuration is the time spent generating embeddings.
+	EmbedDuration time.Duration
+
+	// WriteDuration is the time spent writing entities to storage.
+	WriteDuration time.Duration
+
+	// TotalDuration is the total time for the entire ingestion run.
+	TotalDuration time.Duration
 }
 
 // parseFilesResult holds the aggregated results from parallel parsing.

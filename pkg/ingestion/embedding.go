@@ -137,10 +137,19 @@ func (eg *EmbeddingGenerator) SetRetryConfig(cfg RetryConfig) {
 
 // EmbedFunctionsResult contains the results of embedding generation with error counts.
 type EmbedFunctionsResult struct {
-	Functions      []FunctionEntity
-	ErrorCount     int
+	// Functions contains the function entities with populated embedding vectors.
+	// Functions that failed embedding generation will have empty embedding vectors.
+	Functions []FunctionEntity
+
+	// ErrorCount is the number of functions that failed embedding generation.
+	ErrorCount int
+
+	// TruncatedCount is the number of functions whose code text was truncated before embedding.
 	TruncatedCount int
-	ErrorDetails   []string // Optional: detailed error messages (limited to avoid memory issues)
+
+	// ErrorDetails contains detailed error messages for failed embeddings.
+	// Limited to avoid memory issues (max 100 errors stored).
+	ErrorDetails []string
 }
 
 // EmbedFunctions generates embeddings for a batch of functions.
@@ -303,8 +312,14 @@ func (eg *EmbeddingGenerator) embedFunctionsParallel(ctx context.Context, functi
 
 // EmbedTypesResult contains the results of embedding generation for types.
 type EmbedTypesResult struct {
-	Types          []TypeEntity
-	ErrorCount     int
+	// Types contains the type entities with populated embedding vectors.
+	// Types that failed embedding generation will have empty embedding vectors.
+	Types []TypeEntity
+
+	// ErrorCount is the number of types that failed embedding generation.
+	ErrorCount int
+
+	// TruncatedCount is the number of types whose code text was truncated before embedding.
 	TruncatedCount int
 }
 
