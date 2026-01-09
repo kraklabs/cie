@@ -26,6 +26,19 @@ import (
 	"path/filepath"
 )
 
+// runReset executes the 'reset' CLI command, deleting all local indexed data.
+//
+// This is a destructive operation that removes the entire ~/.cie/data/<project_id>/
+// directory, clearing all locally stored index data, embeddings, and cached state.
+//
+// The user must explicitly confirm with the --yes flag to prevent accidental data loss.
+//
+// Flags:
+//   - --yes: Required confirmation flag (no default)
+//
+// Examples:
+//
+//	cie reset --yes    Delete all local data (destructive!)
 func runReset(args []string, configPath string) {
 	fs := flag.NewFlagSet("reset", flag.ExitOnError)
 	confirm := fs.Bool("yes", false, "Confirm the reset (required)")

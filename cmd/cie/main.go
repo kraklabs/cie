@@ -41,6 +41,22 @@ var (
 	date    = "unknown" // Build date
 )
 
+// main is the entry point for the CIE CLI.
+//
+// It parses global flags, dispatches to command handlers, or starts the MCP server.
+//
+// Global flags:
+//   - --version: Display version information and exit
+//   - --mcp: Start as MCP server (JSON-RPC over stdio)
+//   - --config: Path to .cie/project.yaml configuration file
+//
+// Commands:
+//   - init: Create .cie/project.yaml configuration
+//   - index: Index the current repository
+//   - status: Show project status
+//   - query: Execute CozoScript query
+//   - reset: Reset local project data (destructive!)
+//   - install-hook: Install git post-commit hook for auto-indexing
 func main() {
 	// Global flags
 	var (

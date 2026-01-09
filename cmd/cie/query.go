@@ -33,6 +33,21 @@ import (
 	"github.com/kraklabs/cie/pkg/storage"
 )
 
+// runQuery executes the 'query' CLI command, running CozoScript queries on the indexed codebase.
+//
+// It opens the local CozoDB database and executes the provided Datalog query, returning results
+// as either formatted tables (default) or JSON for programmatic use.
+//
+// Flags:
+//   - --json: Output results as JSON (default: false)
+//   - --timeout: Query timeout duration (default: 30s)
+//   - --limit: Add :limit clause to query (default: 0, no limit)
+//
+// Examples:
+//
+//	cie query '?[name, file] := *cie_function{ name, file_path: file } :limit 10'
+//	cie query '?[name] := *cie_function{ name }' --json
+//	cie query '?[count(id)] := *cie_function{ id }' --timeout 60s
 func runQuery(args []string, configPath string) {
 	fs := flag.NewFlagSet("query", flag.ExitOnError)
 	jsonOutput := fs.Bool("json", false, "Output as JSON")
@@ -154,6 +169,9 @@ Examples:
 	}
 }
 
+// outputQueryError writes a query error as JSON to stdout.
+//
+// Used when --json flag is set and a query fails, ensuring consistent JSON output.
 func outputQueryError(err error) {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
@@ -162,6 +180,9 @@ func outputQueryError(err error) {
 	})
 }
 
+// outputQueryJSON writes query results as formatted JSON to stdout.
+//
+// Includes column headers and rows. Used when --json flag is provided.
 func outputQueryJSON(result *storage.QueryResult) {
 	output := map[string]any{
 		"headers": result.Headers,
@@ -173,6 +194,10 @@ func outputQueryJSON(result *storage.QueryResult) {
 	enc.Encode(output)
 }
 
+// printQueryResult prints query results as a formatted table to stdout.
+//
+// Uses tab-aligned columns for readability. This is the default output format
+// when --json is not specified.
 func printQueryResult(result *storage.QueryResult) {
 	if len(result.Rows) == 0 {
 		fmt.Println("No results")
@@ -215,6 +240,10 @@ func printQueryResult(result *storage.QueryResult) {
 	fmt.Printf("\n(%d rows)\n", len(result.Rows))
 }
 
+// formatCell formats a single cell value for display in the query result table.
+//
+// Handles various CozoDB value types including strings, numbers, booleans, and null.
+// Returns a string representation suitable for terminal output.
 func formatCell(v any) string {
 	switch val := v.(type) {
 	case string:

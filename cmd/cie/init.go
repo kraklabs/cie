@@ -28,6 +28,32 @@ import (
 	"strings"
 )
 
+// runInit executes the 'init' CLI command, creating a .cie/project.yaml configuration file.
+//
+// It creates the configuration directory, generates a default configuration, and optionally
+// prompts the user for customization in interactive mode. The command can also install
+// a git post-commit hook for automatic re-indexing.
+//
+// Flags:
+//   - --force: Overwrite existing configuration (default: false)
+//   - -y: Non-interactive mode, use all defaults (default: false)
+//   - --project-id: Project identifier (default: directory name)
+//   - --ip: CIE server IP for Tailscale/NodePort setup (sets edge-cache and primary-hub)
+//   - --edge-cache: Edge Cache URL (overrides --ip)
+//   - --primary-hub: Primary Hub gRPC address (overrides --ip)
+//   - --embedding-provider: Embedding provider (ollama, nomic, mock)
+//   - --llm-url: LLM API URL for narrative generation
+//   - --llm-model: LLM model name
+//   - --llm-api-key: LLM API key (optional for local models)
+//   - --no-hook: Skip git hook installation
+//   - --hook: Install git hook without prompting
+//
+// Examples:
+//
+//	cie init                           Interactive setup
+//	cie init -y                        Use all defaults
+//	cie init --ip 100.117.59.45        Configure with Tailscale IP
+//	cie init --hook                    Initialize and install git hook
 func runInit(args []string) {
 	fs := flag.NewFlagSet("init", flag.ExitOnError)
 	force := fs.Bool("force", false, "Overwrite existing configuration")
@@ -225,6 +251,17 @@ Options:
 	}
 }
 
+// prompt displays an interactive prompt and reads user input from stdin.
+//
+// If the user presses Enter without providing input, the defaultValue is returned.
+// This is used during interactive configuration setup.
+//
+// Parameters:
+//   - reader: bufio.Reader for reading from stdin
+//   - label: Prompt label to display to the user
+//   - defaultValue: Value to return if user presses Enter (shown in brackets)
+//
+// Returns the user's input or the default value if input is empty.
 func prompt(reader *bufio.Reader, label, defaultValue string) string {
 	if defaultValue != "" {
 		fmt.Printf("%s [%s]: ", label, defaultValue)
@@ -241,6 +278,16 @@ func prompt(reader *bufio.Reader, label, defaultValue string) string {
 	return input
 }
 
+// addToGitignore adds .cie/ to the project's .gitignore file if not already present.
+//
+// It safely appends the entry to .gitignore, avoiding duplicates. If .gitignore does
+// not exist or cannot be modified, the function silently returns without error.
+//
+// The function checks for various .cie/ patterns (.cie, .cie/, /.cie, /.cie/) to
+// avoid adding duplicate entries.
+//
+// Parameters:
+//   - dir: Directory containing the .gitignore file
 func addToGitignore(dir string) {
 	gitignorePath := filepath.Join(dir, ".gitignore")
 

@@ -45,6 +45,19 @@ type StatusResult struct {
 	Timestamp  time.Time `json:"timestamp"`
 }
 
+// runStatus executes the 'status' CLI command, displaying project index statistics.
+//
+// It queries the local CozoDB database to count indexed files, functions, types,
+// embeddings, and call graph edges. This helps users verify that indexing completed
+// successfully and understand the scope of their indexed codebase.
+//
+// Flags:
+//   - --json: Output results as JSON (default: false)
+//
+// Examples:
+//
+//	cie status           Display formatted status
+//	cie status --json    Output as JSON for programmatic use
 func runStatus(args []string, configPath string) {
 	fs := flag.NewFlagSet("status", flag.ExitOnError)
 	jsonOutput := fs.Bool("json", false, "Output as JSON")
@@ -149,6 +162,16 @@ Options:
 	}
 }
 
+// queryLocalCount queries the local CozoDB database to count rows in a table.
+//
+// It executes a Datalog query to count distinct values of the specified primary key field.
+// Returns 0 if the query fails or returns no results.
+//
+// Parameters:
+//   - ctx: Context for the query
+//   - backend: EmbeddedBackend with CozoDB connection
+//   - table: CozoDB table name (e.g., "cie_function")
+//   - pkField: Primary key field name to count (e.g., "id")
 func queryLocalCount(ctx context.Context, backend *storage.EmbeddedBackend, table, pkField string) int {
 	script := fmt.Sprintf("?[count(%s)] := *%s { %s }", pkField, table, pkField)
 	result, err := backend.Query(ctx, script)
@@ -172,12 +195,20 @@ func queryLocalCount(ctx context.Context, backend *storage.EmbeddedBackend, tabl
 	}
 }
 
+// outputStatusJSON writes the status result as formatted JSON to stdout.
+//
+// Used when the --json flag is provided for programmatic consumption
+// or integration with other tools.
 func outputStatusJSON(result *StatusResult) {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	enc.Encode(result)
 }
 
+// printLocalStatus prints the status result as formatted text to stdout.
+//
+// Displays project information and entity counts in a human-readable format.
+// This is the default output when --json is not specified.
 func printLocalStatus(result *StatusResult) {
 	fmt.Println("CIE Project Status (Local)")
 	fmt.Println("==========================")

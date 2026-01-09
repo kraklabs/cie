@@ -94,7 +94,16 @@ type LLMConfig struct {
 	MaxTokens int    `yaml:"max_tokens,omitempty"` // Max tokens for response (default: 2000)
 }
 
-// DefaultConfig returns a config with sensible defaults.
+// DefaultConfig returns a config with sensible defaults for local development.
+//
+// The default configuration uses localhost URLs for both Primary Hub and Edge Cache,
+// and configures Ollama as the embedding provider. Environment variables can override
+// these defaults after the config is loaded.
+//
+// Parameters:
+//   - projectID: Project identifier (typically the directory name)
+//
+// Returns a Config struct with default values for all fields.
 func DefaultConfig(projectID string) *Config {
 	return &Config{
 		Version:   configVersion,
@@ -127,8 +136,19 @@ func DefaultConfig(projectID string) *Config {
 	}
 }
 
-// LoadConfig loads configuration from the specified path or default location.
-// It merges file config with environment variables (env vars take precedence for CIE URLs).
+// LoadConfig loads configuration from the specified path or finds it automatically.
+//
+// If configPath is empty, it searches for .cie/project.yaml in the current directory
+// and parent directories. The CIE_CONFIG_PATH environment variable can override the
+// search path.
+//
+// After loading, environment variables are applied to override file-based configuration.
+//
+// Parameters:
+//   - configPath: Path to config file (empty string to auto-detect)
+//
+// Returns the loaded and merged configuration, or an error if the file cannot be
+// found, read, or parsed.
 func LoadConfig(configPath string) (*Config, error) {
 	if configPath == "" {
 		// Find .cie/project.yaml in current or parent directories
@@ -160,7 +180,16 @@ func LoadConfig(configPath string) (*Config, error) {
 	return &cfg, nil
 }
 
-// SaveConfig writes the configuration to the specified path.
+// SaveConfig writes the configuration to the specified path as YAML.
+//
+// It creates the .cie directory if it doesn't exist, marshals the config to YAML,
+// and writes it to disk with permissions 0644.
+//
+// Parameters:
+//   - cfg: Configuration to save
+//   - configPath: Absolute path where the config file should be written
+//
+// Returns an error if marshaling, directory creation, or file writing fails.
 func SaveConfig(cfg *Config, configPath string) error {
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
@@ -181,17 +210,38 @@ func SaveConfig(cfg *Config, configPath string) error {
 }
 
 // ConfigPath returns the path to the config file in the given directory.
+//
+// Constructs the path as <dir>/.cie/project.yaml.
+//
+// Parameters:
+//   - dir: Base directory (typically the repository root)
+//
+// Returns the absolute path to the config file.
 func ConfigPath(dir string) string {
 	return filepath.Join(dir, defaultConfigDir, defaultConfigFile)
 }
 
-// ConfigDir returns the path to the .cie directory.
+// ConfigDir returns the path to the .cie directory in the given directory.
+//
+// Constructs the path as <dir>/.cie.
+//
+// Parameters:
+//   - dir: Base directory (typically the repository root)
+//
+// Returns the absolute path to the .cie directory.
 func ConfigDir(dir string) string {
 	return filepath.Join(dir, defaultConfigDir)
 }
 
 // findConfigFile searches for .cie/project.yaml in current and parent directories.
-// If CIE_CONFIG_PATH environment variable is set, it uses that path directly.
+//
+// The search algorithm:
+//  1. If CIE_CONFIG_PATH is set, use that path directly
+//  2. Otherwise, start from current directory and walk up to filesystem root
+//  3. In each directory, check for .cie/project.yaml
+//  4. Return the first match found
+//
+// Returns the absolute path to the config file, or an error if not found.
 func findConfigFile() (string, error) {
 	// Check for explicit config path from environment
 	if configPath := os.Getenv("CIE_CONFIG_PATH"); configPath != "" {
@@ -223,7 +273,20 @@ func findConfigFile() (string, error) {
 	return "", fmt.Errorf("no .cie/project.yaml found in current or parent directories; run 'cie init' first")
 }
 
-// applyEnvOverrides applies environment variable overrides to the config.
+// applyEnvOverrides applies environment variable overrides to the configuration.
+//
+// Environment variables take precedence over file-based configuration. This allows
+// users to override settings without modifying the .cie/project.yaml file.
+//
+// Supported environment variables:
+//   - CIE_PROJECT_ID: Override project identifier
+//   - CIE_PRIMARY_HUB: Override Primary Hub gRPC address
+//   - CIE_BASE_URL: Override Edge Cache HTTP URL
+//   - OLLAMA_HOST: Override Ollama base URL
+//   - OLLAMA_EMBED_MODEL: Override embedding model
+//   - CIE_LLM_URL: Enable LLM and set API URL
+//   - CIE_LLM_MODEL: Set LLM model name
+//   - CIE_LLM_API_KEY: Set LLM API key
 func (c *Config) applyEnvOverrides() {
 	if url := os.Getenv("CIE_BASE_URL"); url != "" {
 		c.CIE.EdgeCache = url
@@ -253,7 +316,13 @@ func (c *Config) applyEnvOverrides() {
 	}
 }
 
-// getEnv returns the value of the environment variable or the fallback.
+// getEnv retrieves an environment variable or returns a fallback value if not set.
+//
+// Parameters:
+//   - key: Environment variable name
+//   - fallback: Value to return if the environment variable is not set or empty
+//
+// Returns the environment variable value or the fallback.
 func getEnv(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
 		return value

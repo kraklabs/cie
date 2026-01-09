@@ -35,6 +35,21 @@ COMMIT=$(git rev-parse HEAD)
 cie index --incremental --until="$COMMIT" --skip-checks --queue 2>/dev/null &
 `
 
+// runInstallHook executes the 'install-hook' CLI command, managing git post-commit hooks.
+//
+// It installs or removes a git post-commit hook that automatically triggers incremental
+// indexing after each commit. The hook runs in the background using the queue system
+// to handle concurrent commits gracefully.
+//
+// Flags:
+//   - --force: Overwrite existing hook (default: false)
+//   - --remove: Remove the hook instead of installing (default: false)
+//
+// Examples:
+//
+//	cie install-hook           Install the post-commit hook
+//	cie install-hook --force   Overwrite existing hook
+//	cie install-hook --remove  Remove the hook
 func runInstallHook(args []string, configPath string) {
 	fs := flag.NewFlagSet("install-hook", flag.ExitOnError)
 	force := fs.Bool("force", false, "Overwrite existing hook")
@@ -86,6 +101,12 @@ Options:
 	fmt.Printf("Git hook installed: %s\n", hookPath)
 }
 
+// findGitDir finds the .git directory by walking up the directory tree.
+//
+// Starting from the current working directory, it searches parent directories
+// until it finds a .git directory or reaches the filesystem root.
+//
+// Returns the absolute path to the .git directory, or an error if not found.
 func findGitDir() (string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -125,6 +146,17 @@ func findGitDir() (string, error) {
 	return "", fmt.Errorf("not a git repository (or any of the parent directories)")
 }
 
+// installHook writes the CIE post-commit hook to the specified path.
+//
+// If the hook file already exists and force is false, it checks whether the existing
+// hook is a CIE hook. If force is true, it overwrites any existing hook.
+//
+// Parameters:
+//   - hookPath: Absolute path to the hook file (.git/hooks/post-commit)
+//   - force: Whether to overwrite existing hooks
+//
+// Returns an error if the file cannot be written or if an existing non-CIE hook
+// would be overwritten without force=true.
 func installHook(hookPath string, force bool) error {
 	// Check if hooks directory exists
 	hookDir := filepath.Dir(hookPath)
@@ -153,6 +185,16 @@ func installHook(hookPath string, force bool) error {
 	return nil
 }
 
+// removeHook removes the CIE post-commit hook if it exists and is a CIE hook.
+//
+// It only removes the hook if it contains the CIE marker comment, preventing
+// accidental removal of user-created hooks.
+//
+// Parameters:
+//   - hookPath: Absolute path to the hook file (.git/hooks/post-commit)
+//
+// Returns an error if the file cannot be read or deleted, or if the hook
+// is not a CIE hook (protection against accidental removal).
 func removeHook(hookPath string) error {
 	// Check if hook exists
 	content, err := os.ReadFile(hookPath)
@@ -176,6 +218,12 @@ func removeHook(hookPath string) error {
 	return nil
 }
 
+// containsCIEMarker checks if the hook content contains the CIE marker comment.
+//
+// The marker "# CIE auto-index hook" identifies hooks installed by CIE, allowing
+// safe detection and removal without affecting user-created hooks.
+//
+// Returns true if the marker is found, false otherwise.
 func containsCIEMarker(content string) bool {
 	// Check for our marker comment
 	for i := 0; i < len(content)-20; i++ {
@@ -186,7 +234,12 @@ func containsCIEMarker(content string) bool {
 	return false
 }
 
-// IsHookInstalled checks if the CIE git hook is installed.
+// IsHookInstalled checks if the CIE git hook is currently installed.
+//
+// This is an exported function that can be called by other packages to check
+// hook installation status without attempting to install or remove hooks.
+//
+// Returns true if the hook exists and contains the CIE marker, false otherwise.
 func IsHookInstalled() bool {
 	gitDir, err := findGitDir()
 	if err != nil {

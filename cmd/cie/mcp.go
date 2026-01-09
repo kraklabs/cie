@@ -44,76 +44,104 @@ const (
 	semanticSearchMinEf = 50
 )
 
-// traceFuncInfo holds function metadata for call path tracing
+// traceFuncInfo holds function metadata for call path tracing.
+//
+// Used during trace_path execution to build the call graph and display
+// function locations in the trace results.
 type traceFuncInfo struct {
-	name     string
-	filePath string
-	line     string
+	name     string // Function name
+	filePath string // Source file path
+	line     string // Line number in source file
 }
 
-// JSON-RPC 2.0 structures
+// jsonRPCRequest represents a JSON-RPC 2.0 request from the MCP client.
+//
+// The MCP protocol uses JSON-RPC 2.0 for all client-server communication.
 type jsonRPCRequest struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      any             `json:"id"`
 	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params,omitempty"`
+	Params  json.RawMessage `json:"params,omitempty"` // Request parameters (tool-specific)
 }
 
+// jsonRPCResponse represents a JSON-RPC 2.0 response to the MCP client.
+//
+// Contains either a result (on success) or an error (on failure), never both.
 type jsonRPCResponse struct {
 	JSONRPC string    `json:"jsonrpc"`
 	ID      any       `json:"id,omitempty"`
 	Result  any       `json:"result,omitempty"`
-	Error   *rpcError `json:"error,omitempty"`
+	Error   *rpcError `json:"error,omitempty"`   // Error details (if request failed)
 }
 
+// rpcError represents a JSON-RPC 2.0 error object.
 type rpcError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
-	Data    any    `json:"data,omitempty"`
+	Data    any    `json:"data,omitempty"` // Additional error data (optional)
 }
 
-// MCP structures
+// mcpServerInfo provides server identification for MCP protocol handshake.
 type mcpServerInfo struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
 }
 
 type mcpCapabilities struct {
-	Tools map[string]any `json:"tools,omitempty"`
+	Tools map[string]any `json:"tools,omitempty"` // Tool capabilities declaration
 }
 
+// mcpInitializeResult is the response to the MCP initialize request.
+//
+// Sent during the initial handshake to declare protocol version, capabilities,
+// and server information.
 type mcpInitializeResult struct {
 	ProtocolVersion string          `json:"protocolVersion"`
 	Capabilities    mcpCapabilities `json:"capabilities"`
-	ServerInfo      mcpServerInfo   `json:"serverInfo"`
+	ServerInfo      mcpServerInfo   `json:"serverInfo"`      // Server identification
 }
 
+// mcpTool describes a single tool exposed by the MCP server.
+//
+// Each tool has a name, description, and JSON Schema defining its input parameters.
 type mcpTool struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
-	InputSchema map[string]any `json:"inputSchema"`
+	InputSchema map[string]any `json:"inputSchema"` // JSON Schema for tool parameters
 }
 
+// mcpToolsListResult is the response to the tools/list request.
+//
+// Lists all tools exposed by the CIE MCP server.
 type mcpToolsListResult struct {
 	Tools []mcpTool `json:"tools"`
 }
 
 type mcpToolCallParams struct {
 	Name      string         `json:"name"`
-	Arguments map[string]any `json:"arguments"`
+	Arguments map[string]any `json:"arguments"` // Tool-specific arguments
 }
 
+// mcpToolResult is the result of a tool execution.
+//
+// Contains the tool's output as an array of content blocks (typically text).
 type mcpToolResult struct {
 	Content []mcpContent `json:"content"`
-	IsError bool         `json:"isError,omitempty"`
+	IsError bool         `json:"isError,omitempty"` // True if tool execution failed
 }
 
+// mcpContent represents a single content block in a tool result.
+//
+// MCP supports multiple content types; CIE uses text content exclusively.
 type mcpContent struct {
 	Type string `json:"type"`
-	Text string `json:"text"`
+	Text string `json:"text"` // Content text
 }
 
-// MCP Server
+// mcpServer maintains state for the running MCP server instance.
+//
+// Holds the CIE client for database queries, embedding configuration for
+// semantic search, and custom role patterns from the project configuration.
 type mcpServer struct {
 	client         *tools.CIEClient
 	embeddingURL   string
@@ -121,6 +149,34 @@ type mcpServer struct {
 	customRoles    map[string]RolePattern // Custom role patterns from config
 }
 
+// runMCPServer starts the CIE Model Context Protocol server.
+//
+// It initializes a JSON-RPC 2.0 server over stdin/stdout, exposes 20+ code intelligence
+// tools to AI assistants, and handles all MCP protocol messages including initialization,
+// tool listing, and tool execution.
+//
+// The server runs indefinitely until stdin is closed or an unrecoverable error occurs.
+//
+// MCP Protocol Flow:
+//  1. Client sends initialize request
+//  2. Server responds with capabilities and server info
+//  3. Client sends tools/list to discover available tools
+//  4. Client sends tools/call requests to invoke specific tools
+//  5. Server executes tool and returns results as content blocks
+//
+// Available tools include:
+//   - Semantic search (cie_semantic_search, cie_analyze)
+//   - Text search (cie_grep, cie_search_text, cie_verify_absence)
+//   - Code navigation (cie_find_function, cie_get_function_code, cie_find_type)
+//   - Call graph analysis (cie_find_callers, cie_find_callees, cie_trace_path)
+//   - Architecture discovery (cie_list_endpoints, cie_list_services, cie_directory_summary)
+//   - Database queries (cie_raw_query, cie_schema, cie_index_status)
+//
+// Configuration is loaded from .cie/project.yaml with environment variable overrides.
+// If configuration loading fails, falls back to environment-only configuration.
+//
+// Parameters:
+//   - configPath: Path to .cie/project.yaml (empty string to auto-detect)
 func runMCPServer(configPath string) {
 	var cfg *Config
 	var err error

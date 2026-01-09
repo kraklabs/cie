@@ -34,6 +34,24 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+// runIndex executes the 'index' CLI command, indexing the repository for code intelligence.
+//
+// It parses source files using Tree-sitter, generates embeddings, and stores the results
+// in a local CozoDB database. The indexing process can be run incrementally (default) or
+// forced to reindex everything from scratch.
+//
+// Flags:
+//   - --full: Force full reindex, ignoring previous checkpoint (default: false)
+//   - --force-full-reindex: Delete checkpoint and reindex everything from scratch
+//   - --embed-workers: Number of parallel embedding workers (default: 8)
+//   - --debug: Enable debug logging (default: false)
+//   - --metrics-addr: HTTP address for Prometheus metrics (default: disabled)
+//
+// Examples:
+//
+//	cie index                  Incremental index (only changed files)
+//	cie index --full           Force full reindex
+//	cie index --embed-workers 16  Use 16 parallel workers for embeddings
 func runIndex(args []string, configPath string) {
 	fs := flag.NewFlagSet("index", flag.ExitOnError)
 	full := fs.Bool("full", false, "Force full reindex")
@@ -135,7 +153,12 @@ Options:
 	runLocalIndex(ctx, logger, cfg, cwd, embeddingProvider, *embedWorkers)
 }
 
-// checkLocalData checks if the project has local indexed data.
+// checkLocalData checks if local indexed data exists and returns the function count.
+//
+// Returns:
+//   - bool: true if local data exists and is accessible
+//   - int: number of functions indexed (0 if no data)
+//   - error: error if database cannot be opened
 func checkLocalData(cfg *Config) (bool, int, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -152,6 +175,18 @@ func checkLocalData(cfg *Config) (bool, int, error) {
 	return true, -1, nil
 }
 
+// runLocalIndex executes the local indexing pipeline, writing results to the embedded database.
+//
+// It walks the repository, parses source files, generates embeddings in parallel, and stores
+// all extracted code intelligence data in the local CozoDB database.
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeouts
+//   - logger: Structured logger for progress reporting
+//   - cfg: CIE configuration with project settings
+//   - repoPath: Absolute path to the repository root
+//   - embeddingProvider: Embedding provider name (ollama, nomic, mock)
+//   - embedWorkers: Number of parallel workers for embedding generation
 func runLocalIndex(ctx context.Context, logger *slog.Logger, cfg *Config, repoPath, embeddingProvider string, embedWorkers int) {
 	// Ensure checkpoint directory exists
 	checkpointDir := filepath.Join(ConfigDir(repoPath), "checkpoints")
@@ -220,6 +255,15 @@ func runLocalIndex(ctx context.Context, logger *slog.Logger, cfg *Config, repoPa
 	printResult(result)
 }
 
+// mapEmbeddingProvider maps user-facing provider names to internal identifiers.
+//
+// Maps:
+//   - "ollama" → "ollama"
+//   - "nomic" → "nomic"
+//   - "mock" → "mock"
+//   - unknown → "mock" (fallback for testing)
+//
+// Returns the internal provider identifier string.
 func mapEmbeddingProvider(provider string) string {
 	switch provider {
 	case "ollama":
@@ -235,6 +279,10 @@ func mapEmbeddingProvider(provider string) string {
 	}
 }
 
+// printResult prints the indexing result summary to stdout.
+//
+// Displays statistics about files processed, functions extracted, embeddings generated,
+// and overall execution time. Used to provide user feedback after indexing completes.
 func printResult(result *ingestion.IngestionResult) {
 	fmt.Println()
 	fmt.Println("=== Indexing Complete ===")
