@@ -186,4 +186,6 @@ Releases are managed by maintainers. If you need a release:
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the Apache License 2.0.
+By contributing, you agree that your contributions will be licensed under the GNU Affero General Public License v3.0 (AGPL-3.0-or-later).
+
+**Note:** For dual licensing purposes, if your contribution is accepted, KrakLabs retains the right to offer commercial licenses. This allows us to sustainably fund the project while keeping the core open source.

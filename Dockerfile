@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # Copyright 2024-2025 KrakLabs
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
+# Licensed under the GNU Affero General Public License, Version 3.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: AGPL-3.0-or-later
 
 
 # ==============================================================================
@@ -81,7 +81,7 @@ LABEL org.opencontainers.image.description="Code intelligence through semantic s
 LABEL org.opencontainers.image.url="https://github.com/kraklabs/cie"
 LABEL org.opencontainers.image.source="https://github.com/kraklabs/cie"
 LABEL org.opencontainers.image.vendor="KrakLabs"
-LABEL org.opencontainers.image.licenses="Apache-2.0"
+LABEL org.opencontainers.image.licenses="AGPL-3.0-or-later"
 
 # Copy binary from builder
 COPY --from=builder /app/cie /usr/local/bin/cie
