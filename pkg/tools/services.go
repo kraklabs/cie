@@ -24,7 +24,19 @@ import (
 	"fmt"
 )
 
-// ListServices lists gRPC services from .proto files
+// ListServices lists gRPC services and RPC methods from .proto files.
+//
+// It scans indexed .proto files and extracts service definitions and their RPC methods.
+// Services are identified by parsing function-like entities in proto files.
+//
+// The pathPattern parameter filters proto files by path (regex), leave empty for all files.
+// The serviceName parameter filters by service name (case-insensitive regex), leave empty for all services.
+//
+// Returns a ToolResult containing a formatted list of proto files and their service definitions,
+// grouped by file. Returns an error if the query execution fails.
+//
+// Note: Proto files must be indexed with proto support enabled. If no services are found,
+// check if .proto files are excluded in .cie/project.yaml configuration.
 func ListServices(ctx context.Context, client Querier, pathPattern, serviceName string) (*ToolResult, error) {
 	// First, find .proto files
 	protoQuery := `?[path] := *cie_file { path }, regex_matches(path, "[.]proto$") :limit 100`
@@ -101,7 +113,17 @@ func ListServices(ctx context.Context, client Querier, pathPattern, serviceName 
 	return NewResult(output), nil
 }
 
-// RoleFiltersWithCustom returns CozoScript filter conditions for a given role, supporting custom roles
+// RoleFiltersWithCustom returns CozoScript filter conditions for a given role, supporting custom roles.
+//
+// It first checks if the role exists in the customRoles map. If found, it builds filter conditions
+// based on the custom role's FilePattern, NamePattern, and CodePattern fields.
+// If not found, it falls back to built-in roles from RoleFilters().
+//
+// The role parameter specifies which role to filter for (e.g., "source", "test", "entry_point", or custom).
+// The customRoles parameter provides a map of custom role definitions with their matching patterns.
+//
+// Returns a slice of CozoScript condition strings that can be added to a query's WHERE clause.
+// An empty slice is returned if the role is "any" or unrecognized.
 func RoleFiltersWithCustom(role string, customRoles map[string]RolePattern) []string {
 	// Check for custom role first
 	if customRole, ok := customRoles[role]; ok {

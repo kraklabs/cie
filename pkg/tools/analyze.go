@@ -47,11 +47,28 @@ type relevantFunction struct {
 	StubInfo   *StubDetection // nil if not a stub
 }
 
-// StubDetection holds information about whether a function appears to be a stub/not implemented
+// StubDetection holds information about whether a function appears to be a stub or unimplemented.
+//
+// Stub detection helps filter out placeholder functions from analysis results,
+// improving the quality of semantic search and architectural analysis.
+//
+// The detection heuristics check for common stub patterns across multiple languages:
+//   - Go: "not implemented" errors, panics, ErrNotImplemented returns
+//   - Python: NotImplementedError exceptions
+//   - Rust: todo!() and unimplemented!() macros
+//   - Java: UnsupportedOperationException
+//   - Generic: Empty functions, TODO comments, minimal code lines
 type StubDetection struct {
-	IsStub   bool
-	Reason   string   // Human-readable reason
-	Patterns []string // Which patterns matched
+	// IsStub indicates whether the function is detected as a stub or placeholder.
+	IsStub bool
+
+	// Reason provides a human-readable explanation of why the function was classified as a stub.
+	// Example: "raises NotImplementedError" or "function has only 2 code lines and 1 comment lines"
+	Reason string
+
+	// Patterns lists the specific stub patterns that matched in the function code.
+	// Example: ["returns 'not implemented' error", "minimal code (< 5 lines)"]
+	Patterns []string
 }
 
 // detectStub analyzes function code to determine if it's likely a stub or not implemented.

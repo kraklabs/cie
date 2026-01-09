@@ -48,16 +48,45 @@ var httpMethodPatterns = []struct {
 	{regexp.MustCompile(`\.Group\s*\(\s*["'](/[^"']*)["']`), -1, 1},
 }
 
-// ListEndpointsArgs holds arguments for listing HTTP endpoints
+// ListEndpointsArgs holds arguments for listing HTTP/REST endpoints.
 type ListEndpointsArgs struct {
-	PathPattern string // Filter by file path (e.g., "apps/gateway")
-	PathFilter  string // Filter by endpoint path (e.g., "/health", "connections")
-	Method      string // Filter by HTTP method (e.g., "GET", "POST")
-	Limit       int
+	// PathPattern filters results by file path using regex.
+	// Example: "apps/gateway" matches files in the gateway app directory.
+	PathPattern string
+
+	// PathFilter filters results by endpoint path using substring match.
+	// Example: "/health" matches "/api/v1/health", "connections" matches "/api/connections".
+	PathFilter string
+
+	// Method filters results by HTTP method (case-insensitive).
+	// Examples: "GET", "POST", "PUT", "DELETE", "PATCH".
+	// Leave empty to match all methods.
+	Method string
+
+	// Limit is the maximum number of endpoints to return.
+	// Defaults to 100 if zero or negative.
+	Limit int
 }
 
-// ListEndpoints lists HTTP endpoints found in the codebase
-// Uses a combined regex pattern to find all HTTP route definitions.
+// ListEndpoints lists HTTP/REST endpoints defined in the codebase.
+//
+// It detects route definitions from multiple popular Go web frameworks:
+//   - Gin/Echo: r.GET("/path", handler), e.POST("/path", handler)
+//   - Chi: r.Get("/path", handler), r.Post("/path", handler)
+//   - Fiber: app.Get("/path", handler)
+//   - net/http: http.HandleFunc("/path", handler)
+//   - Generic: mux.Handle("/path", handler), r.Group("/api")
+//
+// The function searches for HTTP method patterns in function code and extracts
+// the endpoint path, method, and handler information.
+//
+// Results can be filtered by file path (PathPattern), endpoint path (PathFilter),
+// or HTTP method (Method). Test files are automatically excluded from results.
+//
+// Returns a ToolResult containing a formatted table of endpoints with columns:
+// [Method] [Path] [Handler] [File:Line]
+//
+// Returns an error if the query execution fails.
 func ListEndpoints(ctx context.Context, client Querier, args ListEndpointsArgs) (*ToolResult, error) {
 	type endpoint struct {
 		Method   string

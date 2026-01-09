@@ -140,6 +140,10 @@ func FormatRows(rows [][]any) string {
 	return sb
 }
 
+// ContainsStr checks if s contains substr as a substring (case-sensitive).
+//
+// This is a simple substring search implementation without using strings.Contains.
+// Returns true if substr is found anywhere in s, false otherwise.
 func ContainsStr(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {
 		if s[i:i+len(substr)] == substr {
@@ -149,6 +153,10 @@ func ContainsStr(s, substr string) bool {
 	return false
 }
 
+// ContainsAny checks if s contains any of the provided substrings (case-sensitive).
+//
+// It returns true if s contains at least one of the substrs, false if none are found.
+// Example: ContainsAny("hello world", []string{"foo", "world"}) returns true
 func ContainsAny(s string, substrs []string) bool {
 	for _, sub := range substrs {
 		if ContainsStr(s, sub) {
@@ -158,6 +166,12 @@ func ContainsAny(s string, substrs []string) bool {
 	return false
 }
 
+// Query2Lower converts a string to lowercase (ASCII only).
+//
+// This function is optimized for query normalization and handles only ASCII characters.
+// Unicode characters are left unchanged. Use ToLower() for the same functionality.
+//
+// Note: This is functionally identical to ToLower() and exists for historical reasons.
 func Query2Lower(s string) string {
 	result := make([]byte, len(s))
 	for i := 0; i < len(s); i++ {
@@ -170,7 +184,12 @@ func Query2Lower(s string) string {
 	return string(result)
 }
 
-// ToLower converts string to lowercase
+// ToLower converts a string to lowercase (ASCII only).
+//
+// This function handles only ASCII characters A-Z and converts them to a-z.
+// Unicode characters are left unchanged. Returns a new string with lowercase conversions applied.
+//
+// Note: This is functionally identical to Query2Lower() and exists for clarity.
 func ToLower(s string) string {
 	result := make([]byte, len(s))
 	for i := 0; i < len(s); i++ {

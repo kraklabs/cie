@@ -24,7 +24,25 @@ import (
 	"fmt"
 )
 
-// DirectorySummary shows files in a directory with their main functions
+// DirectorySummary shows files in a directory with their main exported functions.
+//
+// It lists all files in the specified directory and shows the most important functions
+// in each file. Functions are prioritized by visibility (exported/public first) and name length.
+//
+// The path parameter specifies the directory to summarize (e.g., "internal/cie/ingestion").
+// The maxFuncsPerFile parameter limits how many functions to show per file.
+// If maxFuncsPerFile is 0 or negative, defaults to 5 functions per file.
+//
+// Returns a ToolResult containing a formatted directory listing with file paths and their
+// key functions (name, signature, line number). Returns an error if the query fails.
+//
+// Example output format:
+//   # Directory Summary: `internal/cie`
+//   Found **3 files**
+//
+//   ## internal/cie/client.go
+//   - **NewClient** (line 25): `func NewClient(url string) *Client`
+//   - **Query** (line 45): `func (c *Client) Query(ctx context.Context, script string) (*Result, error)`
 func DirectorySummary(ctx context.Context, client Querier, path string, maxFuncsPerFile int) (*ToolResult, error) {
 	if path == "" {
 		return NewError("Error: 'path' is required"), nil
