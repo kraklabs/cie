@@ -16,10 +16,7 @@
 // For commercial licensing, contact: licensing@kraklabs.com
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Package bootstrap provides functions to initialize CIE projects.
-//
-// For standalone/open-source CIE, this initializes a local CozoDB database
-// with the required schema for code indexing.
+
 package bootstrap
 
 import (
