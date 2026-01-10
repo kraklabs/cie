@@ -16,8 +16,7 @@
 // For commercial licensing, contact: licensing@kraklabs.com
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Package llm provides a unified interface for Large Language Model providers.
-// Supports multiple backends: Ollama, OpenAI-compatible APIs, and more.
+
 package llm
 
 import (
@@ -48,52 +47,82 @@ type Provider interface {
 
 // GenerateRequest represents a text generation request.
 type GenerateRequest struct {
-	Prompt      string         `json:"prompt"`
-	Model       string         `json:"model,omitempty"`
-	MaxTokens   int            `json:"max_tokens,omitempty"`
-	Temperature float64        `json:"temperature,omitempty"`
-	TopP        float64        `json:"top_p,omitempty"`
-	Stop        []string       `json:"stop,omitempty"`
-	Options     map[string]any `json:"options,omitempty"`
+	// Prompt is the input text to generate a completion for.
+	Prompt string `json:"prompt"`
+	// Model specifies which model to use. If empty, uses the provider's default.
+	Model string `json:"model,omitempty"`
+	// MaxTokens limits the response length. Zero means provider default.
+	MaxTokens int `json:"max_tokens,omitempty"`
+	// Temperature controls randomness (0.0-2.0). Lower is more deterministic.
+	Temperature float64 `json:"temperature,omitempty"`
+	// TopP is nucleus sampling parameter (0.0-1.0). Alternative to temperature.
+	TopP float64 `json:"top_p,omitempty"`
+	// Stop sequences that will halt generation when encountered.
+	Stop []string `json:"stop,omitempty"`
+	// Options contains provider-specific parameters.
+	Options map[string]any `json:"options,omitempty"`
 }
 
 // GenerateResponse contains the LLM response.
 type GenerateResponse struct {
-	Text         string        `json:"text"`
-	Model        string        `json:"model"`
-	PromptTokens int           `json:"prompt_tokens,omitempty"`
-	OutputTokens int           `json:"output_tokens,omitempty"`
-	TotalTokens  int           `json:"total_tokens,omitempty"`
-	Duration     time.Duration `json:"duration,omitempty"`
-	Done         bool          `json:"done"`
+	// Text is the generated completion text.
+	Text string `json:"text"`
+	// Model is the model that generated this response.
+	Model string `json:"model"`
+	// PromptTokens is the number of tokens in the input prompt.
+	PromptTokens int `json:"prompt_tokens,omitempty"`
+	// OutputTokens is the number of tokens in the generated response.
+	OutputTokens int `json:"output_tokens,omitempty"`
+	// TotalTokens is PromptTokens + OutputTokens.
+	TotalTokens int `json:"total_tokens,omitempty"`
+	// Duration is how long the generation took.
+	Duration time.Duration `json:"duration,omitempty"`
+	// Done indicates whether generation completed normally.
+	Done bool `json:"done"`
 }
 
-// Message represents a chat message.
+// Message represents a chat message in a conversation.
 type Message struct {
-	Role    string `json:"role"` // "system", "user", "assistant"
+	// Role is the message author: "system", "user", or "assistant".
+	Role string `json:"role"`
+	// Content is the message text.
 	Content string `json:"content"`
 }
 
 // ChatRequest represents a chat completion request.
 type ChatRequest struct {
-	Messages    []Message      `json:"messages"`
-	Model       string         `json:"model,omitempty"`
-	MaxTokens   int            `json:"max_tokens,omitempty"`
-	Temperature float64        `json:"temperature,omitempty"`
-	TopP        float64        `json:"top_p,omitempty"`
-	Stop        []string       `json:"stop,omitempty"`
-	Options     map[string]any `json:"options,omitempty"`
+	// Messages is the conversation history to continue from.
+	Messages []Message `json:"messages"`
+	// Model specifies which model to use. If empty, uses the provider's default.
+	Model string `json:"model,omitempty"`
+	// MaxTokens limits the response length. Zero means provider default.
+	MaxTokens int `json:"max_tokens,omitempty"`
+	// Temperature controls randomness (0.0-2.0). Lower is more deterministic.
+	Temperature float64 `json:"temperature,omitempty"`
+	// TopP is nucleus sampling parameter (0.0-1.0). Alternative to temperature.
+	TopP float64 `json:"top_p,omitempty"`
+	// Stop sequences that will halt generation when encountered.
+	Stop []string `json:"stop,omitempty"`
+	// Options contains provider-specific parameters.
+	Options map[string]any `json:"options,omitempty"`
 }
 
 // ChatResponse contains the chat completion response.
 type ChatResponse struct {
-	Message      Message       `json:"message"`
-	Model        string        `json:"model"`
-	PromptTokens int           `json:"prompt_tokens,omitempty"`
-	OutputTokens int           `json:"output_tokens,omitempty"`
-	TotalTokens  int           `json:"total_tokens,omitempty"`
-	Duration     time.Duration `json:"duration,omitempty"`
-	Done         bool          `json:"done"`
+	// Message is the assistant's response.
+	Message Message `json:"message"`
+	// Model is the model that generated this response.
+	Model string `json:"model"`
+	// PromptTokens is the number of tokens in the input messages.
+	PromptTokens int `json:"prompt_tokens,omitempty"`
+	// OutputTokens is the number of tokens in the generated response.
+	OutputTokens int `json:"output_tokens,omitempty"`
+	// TotalTokens is PromptTokens + OutputTokens.
+	TotalTokens int `json:"total_tokens,omitempty"`
+	// Duration is how long the generation took.
+	Duration time.Duration `json:"duration,omitempty"`
+	// Done indicates whether generation completed normally.
+	Done bool `json:"done"`
 }
 
 // ProviderConfig holds configuration for creating providers.
@@ -742,10 +771,14 @@ func (p *anthropicProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRes
 // =============================================================================
 
 // MockProvider is a test provider that returns predictable responses.
+// Use it in tests to avoid real API calls. Override GenerateFunc or ChatFunc
+// to customize the mock behavior.
 type MockProvider struct {
-	model        string
+	model string
+	// GenerateFunc overrides the default Generate behavior when set.
 	GenerateFunc func(ctx context.Context, req GenerateRequest) (*GenerateResponse, error)
-	ChatFunc     func(ctx context.Context, req ChatRequest) (*ChatResponse, error)
+	// ChatFunc overrides the default Chat behavior when set.
+	ChatFunc func(ctx context.Context, req ChatRequest) (*ChatResponse, error)
 }
 
 func (p *MockProvider) Name() string { return "mock" }

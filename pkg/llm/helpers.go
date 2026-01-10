@@ -95,12 +95,18 @@ func QuickChat(ctx context.Context, messages ...string) (string, error) {
 	return resp.Message.Content, nil
 }
 
-// CodePrompt helps build prompts for code-related tasks.
+// CodePrompt helps build structured prompts for code-related tasks.
+// Use the Build method to generate a formatted prompt string.
 type CodePrompt struct {
-	Task        string
-	Language    string
-	Code        string
-	Context     string
+	// Task describes what to do (e.g., "Explain this function").
+	Task string
+	// Language is the programming language (e.g., "go", "python").
+	Language string
+	// Code is the source code to analyze.
+	Code string
+	// Context provides additional background information.
+	Context string
+	// Constraints are requirements or limitations for the response.
 	Constraints []string
 }
 
@@ -133,15 +139,23 @@ func (cp CodePrompt) Build() string {
 	return sb.String()
 }
 
-// SystemPrompts contains common system prompts for code tasks.
+// SystemPrompts contains pre-built system prompts for common code tasks.
+// Use with BuildChatMessages to create chat requests.
 var SystemPrompts = struct {
-	CodeReview   string
-	CodeExplain  string
+	// CodeReview prompts for code review and bug detection.
+	CodeReview string
+	// CodeExplain prompts for explaining code to learners.
+	CodeExplain string
+	// CodeRefactor prompts for improving code quality.
 	CodeRefactor string
+	// CodeGenerate prompts for generating new code.
 	CodeGenerate string
+	// CodeDocument prompts for generating documentation.
 	CodeDocument string
-	CodeDebug    string
-	CodeTest     string
+	// CodeDebug prompts for debugging and error analysis.
+	CodeDebug string
+	// CodeTest prompts for generating test cases.
+	CodeTest string
 }{
 	CodeReview: `You are an expert code reviewer. Analyze the provided code for:
 - Bugs and potential issues
