@@ -16,12 +16,6 @@
 // For commercial licensing, contact: licensing@kraklabs.com
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Package cozodb provides a Go binding for CozoDB v0.7.6+
-//
-// This is a custom binding that supports the v0.7.6 C API, which includes
-// the `immutable_query` parameter in cozo_run_query. The official cozo-lib-go
-// v0.7.5 does not support this parameter, causing undefined behavior with
-// newer libcozo_c versions.
 
 package cozodb
 

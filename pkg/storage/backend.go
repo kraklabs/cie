@@ -16,14 +16,7 @@
 // For commercial licensing, contact: licensing@kraklabs.com
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Package storage provides storage backend abstractions for CIE.
-//
-// This package defines the Backend interface that allows CIE to work with
-// different storage implementations:
-//   - EmbeddedBackend: Local CozoDB for standalone/open-source use
-//   - RemoteBackend: Connects to CIE Enterprise (Primary Hub/Edge Cache)
-//
-// The same MCP tools work with any backend implementation.
+
 package storage
 
 import (
