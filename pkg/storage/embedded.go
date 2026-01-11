@@ -155,96 +155,7 @@ func (b *EmbeddedBackend) DB() *cozo.CozoDB {
 // EnsureSchema creates the CIE tables if they don't exist.
 // This is idempotent and safe to call multiple times.
 func (b *EmbeddedBackend) EnsureSchema() error {
-	schema := `
-// CIE Ingestion Schema v3 - Vertically Partitioned
-// File entities: represents source files in the repository
-:create cie_file {
-	id: String =>
-	path: String,
-	hash: String,
-	language: String,
-	size: Int
-}
-
-// Function entities: lightweight metadata (~500 bytes/row)
-:create cie_function {
-	id: String =>
-	name: String,
-	signature: String,
-	file_path: String,
-	start_line: Int,
-	end_line: Int,
-	start_col: Int,
-	end_col: Int
-}
-
-// Function code text: lazy loaded only when displaying source
-:create cie_function_code {
-	function_id: String =>
-	code_text: String
-}
-
-// Function embeddings: used only for HNSW semantic search
-:create cie_function_embedding {
-	function_id: String =>
-	embedding: <F32; 1536>
-}
-
-// Defines edges: file -> function
-:create cie_defines {
-	id: String =>
-	file_id: String,
-	function_id: String
-}
-
-// Calls edges: function -> function
-:create cie_calls {
-	id: String =>
-	caller_id: String,
-	callee_id: String
-}
-
-// Import entities
-:create cie_import {
-	id: String =>
-	file_path: String,
-	import_path: String,
-	alias: String,
-	start_line: Int
-}
-
-// Type entities
-:create cie_type {
-	id: String =>
-	name: String,
-	kind: String,
-	file_path: String,
-	start_line: Int,
-	end_line: Int,
-	start_col: Int,
-	end_col: Int
-}
-
-// Type code text
-:create cie_type_code {
-	type_id: String =>
-	code_text: String
-}
-
-// Type embeddings
-:create cie_type_embedding {
-	type_id: String =>
-	embedding: <F32; 1536>
-}
-
-// Defines type edges: file -> type
-:create cie_defines_type {
-	id: String =>
-	file_id: String,
-	type_id: String
-}
-`
-	// Try to create each table individually, ignoring "already exists" errors
+	// Create each table individually, ignoring "already exists" errors
 	tables := []string{
 		`:create cie_file { id: String => path: String, hash: String, language: String, size: Int }`,
 		`:create cie_function { id: String => name: String, signature: String, file_path: String, start_line: Int, end_line: Int, start_col: Int, end_col: Int }`,
@@ -270,9 +181,6 @@ func (b *EmbeddedBackend) EnsureSchema() error {
 			continue
 		}
 	}
-
-	// Suppress unused variable warning
-	_ = schema
 
 	return nil
 }

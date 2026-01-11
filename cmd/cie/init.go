@@ -54,6 +54,7 @@ import (
 //	cie init -y                        Use all defaults
 //	cie init --ip 100.117.59.45        Configure with Tailscale IP
 //	cie init --hook                    Initialize and install git hook
+//
 // initFlags holds parsed flags for the init command.
 type initFlags struct {
 	force, nonInteractive, noHook, withHook bool

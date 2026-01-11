@@ -108,9 +108,9 @@ func ExampleFindCallers() {
 func ExampleTracePath() {
 	args := tools.TracePathArgs{
 		Target:   "RegisterRoutes",
-		Source:   "main",      // Auto-detects entry points if empty
-		MaxDepth: 10,          // Maximum call chain depth
-		MaxPaths: 3,           // Return top 3 shortest paths
+		Source:   "main", // Auto-detects entry points if empty
+		MaxDepth: 10,     // Maximum call chain depth
+		MaxPaths: 3,      // Return top 3 shortest paths
 	}
 
 	fmt.Printf("Tracing from: %s\n", args.Source)

@@ -94,10 +94,10 @@ func getTraceSources(ctx context.Context, client Querier, args TracePathArgs) ([
 
 // traceSearchResult holds the result of a trace search.
 type traceSearchResult struct {
-	paths        [][]TraceFuncInfo
+	paths         [][]TraceFuncInfo
 	nodesExplored int
-	limitReached bool
-	cancelled    bool
+	limitReached  bool
+	cancelled     bool
 }
 
 // pathNode represents a node in the BFS traversal.

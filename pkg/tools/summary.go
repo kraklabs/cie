@@ -37,12 +37,13 @@ import (
 // key functions (name, signature, line number). Returns an error if the query fails.
 //
 // Example output format:
-//   # Directory Summary: `internal/cie`
-//   Found **3 files**
 //
-//   ## internal/cie/client.go
-//   - **NewClient** (line 25): `func NewClient(url string) *Client`
-//   - **Query** (line 45): `func (c *Client) Query(ctx context.Context, script string) (*Result, error)`
+//	# Directory Summary: `internal/cie`
+//	Found **3 files**
+//
+//	## internal/cie/client.go
+//	- **NewClient** (line 25): `func NewClient(url string) *Client`
+//	- **Query** (line 45): `func (c *Client) Query(ctx context.Context, script string) (*Result, error)`
 func DirectorySummary(ctx context.Context, client Querier, path string, maxFuncsPerFile int) (*ToolResult, error) {
 	if path == "" {
 		return NewError("Error: 'path' is required"), nil

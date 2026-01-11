@@ -52,7 +52,7 @@ type jsonRPCResponse struct {
 	JSONRPC string    `json:"jsonrpc"`
 	ID      any       `json:"id,omitempty"`
 	Result  any       `json:"result,omitempty"`
-	Error   *rpcError `json:"error,omitempty"`   // Error details (if request failed)
+	Error   *rpcError `json:"error,omitempty"` // Error details (if request failed)
 }
 
 // rpcError represents a JSON-RPC 2.0 error object.
@@ -79,7 +79,7 @@ type mcpCapabilities struct {
 type mcpInitializeResult struct {
 	ProtocolVersion string          `json:"protocolVersion"`
 	Capabilities    mcpCapabilities `json:"capabilities"`
-	ServerInfo      mcpServerInfo   `json:"serverInfo"`      // Server identification
+	ServerInfo      mcpServerInfo   `json:"serverInfo"` // Server identification
 }
 
 // mcpTool describes a single tool exposed by the MCP server.
@@ -790,29 +790,29 @@ type toolHandler func(ctx context.Context, s *mcpServer, args map[string]any) (*
 
 // toolHandlers maps tool names to their handlers.
 var toolHandlers = map[string]toolHandler{
-	"cie_schema":              handleSchema,
-	"cie_search_text":         handleSearchText,
-	"cie_find_function":       handleFindFunction,
-	"cie_find_callers":        handleFindCallers,
-	"cie_find_callees":        handleFindCallees,
-	"cie_list_files":          handleListFiles,
-	"cie_raw_query":           handleRawQuery,
-	"cie_get_function_code":   handleGetFunctionCode,
+	"cie_schema":                 handleSchema,
+	"cie_search_text":            handleSearchText,
+	"cie_find_function":          handleFindFunction,
+	"cie_find_callers":           handleFindCallers,
+	"cie_find_callees":           handleFindCallees,
+	"cie_list_files":             handleListFiles,
+	"cie_raw_query":              handleRawQuery,
+	"cie_get_function_code":      handleGetFunctionCode,
 	"cie_list_functions_in_file": handleListFunctionsInFile,
-	"cie_get_call_graph":      handleGetCallGraph,
+	"cie_get_call_graph":         handleGetCallGraph,
 	"cie_find_similar_functions": handleFindSimilarFunctions,
-	"cie_get_file_summary":    handleGetFileSummary,
-	"cie_semantic_search":     handleSemanticSearch,
-	"cie_analyze":             handleAnalyze,
-	"cie_find_type":           handleFindType,
-	"cie_index_status":        handleIndexStatus,
-	"cie_grep":                handleGrep,
-	"cie_verify_absence":      handleVerifyAbsence,
-	"cie_list_services":       handleListServices,
-	"cie_directory_summary":   handleDirectorySummary,
-	"cie_list_endpoints":      handleListEndpoints,
-	"cie_find_implementations": handleFindImplementations,
-	"cie_trace_path":          handleTracePath,
+	"cie_get_file_summary":       handleGetFileSummary,
+	"cie_semantic_search":        handleSemanticSearch,
+	"cie_analyze":                handleAnalyze,
+	"cie_find_type":              handleFindType,
+	"cie_index_status":           handleIndexStatus,
+	"cie_grep":                   handleGrep,
+	"cie_verify_absence":         handleVerifyAbsence,
+	"cie_list_services":          handleListServices,
+	"cie_directory_summary":      handleDirectorySummary,
+	"cie_list_endpoints":         handleListEndpoints,
+	"cie_find_implementations":   handleFindImplementations,
+	"cie_trace_path":             handleTracePath,
 }
 
 func (s *mcpServer) handleToolCall(ctx context.Context, params mcpToolCallParams) (*mcpToolResult, error) {

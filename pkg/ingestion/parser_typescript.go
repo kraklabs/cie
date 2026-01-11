@@ -82,11 +82,11 @@ func (p *TreeSitterParser) parseTypeScriptAST(content []byte, filePath string) (
 
 // tsWalkContext holds context for TypeScript AST walking.
 type tsWalkContext struct {
-	content     []byte
-	filePath    string
-	functions   *[]FunctionEntity
+	content      []byte
+	filePath     string
+	functions    *[]FunctionEntity
 	funcNameToID map[string]string
-	anonCounter *int
+	anonCounter  *int
 }
 
 // walkTSFunctions walks TypeScript AST (extends JS walker with TS-specific nodes).
@@ -96,11 +96,11 @@ func (p *TreeSitterParser) walkTSFunctions(node *sitter.Node, content []byte, fi
 	}
 
 	ctx := &tsWalkContext{
-		content:     content,
-		filePath:    filePath,
-		functions:   functions,
+		content:      content,
+		filePath:     filePath,
+		functions:    functions,
 		funcNameToID: funcNameToID,
-		anonCounter: anonCounter,
+		anonCounter:  anonCounter,
 	}
 
 	p.processTSNode(node, ctx)
