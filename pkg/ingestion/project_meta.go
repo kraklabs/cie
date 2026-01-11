@@ -244,7 +244,7 @@ func GetDefinesEdgesForFiles(ctx context.Context, client tools.Querier, filePath
 	// First get file IDs
 	fileIDs, err := GetFileIDsForPaths(ctx, client, filePaths)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get file ids for paths: %w", err)
 	}
 
 	if len(fileIDs) == 0 {

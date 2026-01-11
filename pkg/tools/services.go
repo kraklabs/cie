@@ -46,7 +46,7 @@ func ListServices(ctx context.Context, client Querier, pathPattern, serviceName 
 
 	protoFiles, err := client.Query(ctx, protoQuery)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("query proto files: %w", err)
 	}
 
 	if len(protoFiles.Rows) == 0 {
@@ -72,7 +72,7 @@ func ListServices(ctx context.Context, client Querier, pathPattern, serviceName 
 
 	result, err := client.Query(ctx, script)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("query service definitions: %w", err)
 	}
 
 	output := "# gRPC Services\n\n"

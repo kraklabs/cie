@@ -219,7 +219,7 @@ func (p *ollamaProvider) Name() string { return "ollama" }
 func (p *ollamaProvider) Models(ctx context.Context) ([]string, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", p.baseURL+"/api/tags", nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create ollama models request: %w", err)
 	}
 
 	resp, err := p.client.Do(req)
@@ -234,7 +234,7 @@ func (p *ollamaProvider) Models(ctx context.Context) ([]string, error) {
 		} `json:"models"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse ollama models response: %w", err)
 	}
 
 	models := make([]string, len(result.Models))
@@ -274,7 +274,7 @@ func (p *ollamaProvider) Generate(ctx context.Context, req GenerateRequest) (*Ge
 	body, _ := json.Marshal(payload)
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/api/generate", strings.NewReader(string(body)))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create ollama generate request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
@@ -299,7 +299,7 @@ func (p *ollamaProvider) Generate(ctx context.Context, req GenerateRequest) (*Ge
 		TotalDuration   int64  `json:"total_duration"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse ollama generate response: %w", err)
 	}
 
 	return &GenerateResponse{
@@ -352,7 +352,7 @@ func (p *ollamaProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	body, _ := json.Marshal(payload)
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/api/chat", strings.NewReader(string(body)))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create ollama chat request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
@@ -379,7 +379,7 @@ func (p *ollamaProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 		EvalCount       int    `json:"eval_count"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse ollama chat response: %w", err)
 	}
 
 	return &ChatResponse{
@@ -444,7 +444,7 @@ func (p *openaiProvider) Name() string { return "openai" }
 func (p *openaiProvider) Models(ctx context.Context) ([]string, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", p.baseURL+"/models", nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create openai models request: %w", err)
 	}
 	if p.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+p.apiKey)
@@ -462,7 +462,7 @@ func (p *openaiProvider) Models(ctx context.Context) ([]string, error) {
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse openai models response: %w", err)
 	}
 
 	models := make([]string, len(result.Data))
@@ -484,7 +484,7 @@ func (p *openaiProvider) Generate(ctx context.Context, req GenerateRequest) (*Ge
 	}
 	chatResp, err := p.Chat(ctx, chatReq)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("openai generate via chat: %w", err)
 	}
 	return &GenerateResponse{
 		Text:         chatResp.Message.Content,
@@ -531,7 +531,7 @@ func (p *openaiProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	body, _ := json.Marshal(payload)
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/chat/completions", strings.NewReader(string(body)))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create openai chat request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	if p.apiKey != "" {
@@ -566,7 +566,7 @@ func (p *openaiProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 		} `json:"usage"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse openai chat response: %w", err)
 	}
 
 	if len(result.Choices) == 0 {
@@ -651,7 +651,7 @@ func (p *anthropicProvider) Generate(ctx context.Context, req GenerateRequest) (
 	}
 	chatResp, err := p.Chat(ctx, chatReq)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("anthropic generate via chat: %w", err)
 	}
 	return &GenerateResponse{
 		Text:         chatResp.Message.Content,
@@ -711,7 +711,7 @@ func (p *anthropicProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRes
 	body, _ := json.Marshal(payload)
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/messages", strings.NewReader(string(body)))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create anthropic chat request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("x-api-key", p.apiKey)
@@ -742,7 +742,7 @@ func (p *anthropicProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRes
 		} `json:"usage"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse anthropic chat response: %w", err)
 	}
 
 	var content string

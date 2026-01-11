@@ -354,14 +354,14 @@ func generateEmbedding(ctx context.Context, embeddingURL, embeddingModel, text s
 
 	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create embedding request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 60 * time.Second} // Longer timeout for local models
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("embedding http request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -373,7 +373,7 @@ func generateEmbedding(ctx context.Context, embeddingURL, embeddingModel, text s
 	// Try to parse the response body
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read embedding response: %w", err)
 	}
 
 	// OpenAI returns: {"data": [{"embedding": [...]}]}
@@ -413,7 +413,7 @@ func generateEmbedding(ctx context.Context, embeddingURL, embeddingModel, text s
 		Embedding []float64 `json:"embedding"`
 	}
 	if err := json.Unmarshal(respBody, &result); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse ollama embedding response: %w", err)
 	}
 
 	if len(result.Embedding) == 0 {

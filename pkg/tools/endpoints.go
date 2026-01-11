@@ -106,7 +106,7 @@ func ListEndpoints(ctx context.Context, client Querier, args ListEndpointsArgs) 
 
 	result, err := client.Query(ctx, script)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("query endpoints: %w", err)
 	}
 
 	// Parse endpoints from matching functions

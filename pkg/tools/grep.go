@@ -66,7 +66,7 @@ func Grep(ctx context.Context, client Querier, args GrepArgs) (*ToolResult, erro
 	script := buildGrepQuery(args, needsCode)
 	result, err := client.Query(ctx, script)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("grep query: %w", err)
 	}
 
 	if len(result.Rows) == 0 {
@@ -241,7 +241,7 @@ func grepMulti(ctx context.Context, client Querier, args GrepArgs) (*ToolResult,
 	script := buildGrepMultiQuery(args)
 	result, err := client.Query(ctx, script)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("grep multi query: %w", err)
 	}
 
 	patternCounts, patternMatches := groupGrepMultiResults(result.Rows, args)
@@ -595,7 +595,7 @@ func VerifyAbsence(ctx context.Context, client Querier, args VerifyAbsenceArgs) 
 
 	result, err := client.Query(ctx, buildAbsenceQuery(args))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("verify absence query: %w", err)
 	}
 
 	filesScanned := countAbsenceFiles(ctx, client, args.Path)

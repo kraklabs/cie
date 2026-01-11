@@ -155,7 +155,7 @@ func LoadConfig(configPath string) (*Config, error) {
 		var err error
 		configPath, err = findConfigFile()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("find config file: %w", err)
 		}
 	}
 

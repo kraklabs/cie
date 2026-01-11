@@ -52,7 +52,7 @@ func DirectorySummary(ctx context.Context, client Querier, path string, maxFuncs
 
 	filesResult, err := queryDirFiles(ctx, client, path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("query directory files: %w", err)
 	}
 	if len(filesResult.Rows) == 0 {
 		return NewResult(fmt.Sprintf("No files found in path: `%s`\n\nUse `cie_list_files` to see available paths.", path)), nil
@@ -77,7 +77,7 @@ func queryDirFiles(ctx context.Context, client Querier, path string) (*QueryResu
 	query := fmt.Sprintf(`?[path] := *cie_file { path }, regex_matches(path, %q) :order path :limit 100`, "^"+EscapeRegex(path)+"/")
 	result, err := client.Query(ctx, query)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("query directory %s: %w", path, err)
 	}
 	if len(result.Rows) == 0 {
 		query = fmt.Sprintf(`?[path] := *cie_file { path }, regex_matches(path, %q) :order path :limit 100`, EscapeRegex(path))

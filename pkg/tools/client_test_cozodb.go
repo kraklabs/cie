@@ -45,7 +45,7 @@ func NewTestCIEClient(db *cozo.CozoDB) *TestCIEClient {
 func (c *TestCIEClient) Query(ctx context.Context, script string) (*QueryResult, error) {
 	result, err := c.DB.Run(script, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cozodb query: %w", err)
 	}
 
 	// Convert cozo.Result to QueryResult
@@ -59,7 +59,7 @@ func (c *TestCIEClient) Query(ctx context.Context, script string) (*QueryResult,
 func (c *TestCIEClient) QueryRaw(ctx context.Context, script string) (map[string]any, error) {
 	result, err := c.DB.Run(script, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cozodb raw query: %w", err)
 	}
 
 	return map[string]any{

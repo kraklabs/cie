@@ -76,7 +76,7 @@ func (c *CIEClient) Query(ctx context.Context, script string) (*QueryResult, err
 
 	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/v1/query", bytes.NewReader(reqBody))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create query request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
@@ -108,7 +108,7 @@ func (c *CIEClient) QueryRaw(ctx context.Context, script string) (map[string]any
 
 	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/v1/query", bytes.NewReader(reqBody))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create raw query request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 

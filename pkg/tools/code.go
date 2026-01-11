@@ -203,13 +203,13 @@ func GetCallGraph(ctx context.Context, client Querier, args GetCallGraphArgs) (*
 	// Get callers
 	callersResult, err := FindCallers(ctx, client, FindCallersArgs{FunctionName: funcName})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("find callers for %s: %w", funcName, err)
 	}
 
 	// Get callees
 	calleesResult, err := FindCallees(ctx, client, FindCalleesArgs{FunctionName: funcName})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("find callees for %s: %w", funcName, err)
 	}
 
 	var sb strings.Builder

@@ -137,7 +137,7 @@ func (q *IndexQueue) GetLockInfo() (*LockInfo, error) {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
-		return nil, err
+		return nil, fmt.Errorf("read lock file: %w", err)
 	}
 
 	var pid int
@@ -220,7 +220,7 @@ func (q *IndexQueue) GetQueuedCommits() ([]string, error) {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
-		return nil, err
+		return nil, fmt.Errorf("read queue file: %w", err)
 	}
 
 	var commits []string

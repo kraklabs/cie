@@ -132,7 +132,7 @@ func (d *GitDelta) GetOldPath(newPath string) string {
 func (dd *DeltaDetector) DetectDelta(baseSHA, headSHA string) (*GitDelta, error) {
 	resolvedBase, resolvedHead, err := dd.resolveRefs(baseSHA, headSHA)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("resolve git refs: %w", err)
 	}
 
 	delta := &GitDelta{
@@ -143,11 +143,11 @@ func (dd *DeltaDetector) DetectDelta(baseSHA, headSHA string) (*GitDelta, error)
 
 	output, err := dd.runGitDiff(resolvedBase, resolvedHead)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("run git diff: %w", err)
 	}
 
 	if err := dd.parseDiffOutput(output, delta); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse diff output: %w", err)
 	}
 
 	sortDeltaLists(delta)
