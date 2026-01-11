@@ -1,0 +1,25 @@
+{
+  "semantic_search": {
+    "headers": ["name", "file_path", "signature", "start_line", "similarity"],
+    "rows": [
+      ["FindFunction", "/pkg/tools/code.go", "func FindFunction(ctx context.Context, client Querier, args FindFunctionArgs) (*ToolResult, error)", 45, 0.85],
+      ["SearchText", "/pkg/tools/search.go", "func SearchText(ctx context.Context, client Querier, args SearchTextArgs) (*ToolResult, error)", 32, 0.78],
+      ["SemanticSearch", "/pkg/tools/semantic.go", "func SemanticSearch(ctx context.Context, client Querier, args SemanticSearchArgs) (*ToolResult, error)", 67, 0.92]
+    ]
+  },
+  "text_search": {
+    "headers": ["name", "file_path", "line", "match_context"],
+    "rows": [
+      ["HandleHTTPRequest", "/api/handler.go", 10, "func HandleHTTPRequest(w http.ResponseWriter, r *http.Request)"],
+      ["ProcessHTTPResponse", "/api/processor.go", 25, "func ProcessHTTPResponse(resp *http.Response) error"]
+    ]
+  },
+  "function_list": {
+    "headers": ["id", "name", "file_path", "signature"],
+    "rows": [
+      ["func_1", "Main", "/cmd/main.go", "func main()"],
+      ["func_2", "Init", "/internal/init.go", "func Init() error"],
+      ["func_3", "Shutdown", "/internal/shutdown.go", "func Shutdown() error"]
+    ]
+  }
+}
