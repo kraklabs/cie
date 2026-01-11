@@ -47,33 +47,11 @@ func TracePath(ctx context.Context, client Querier, args TracePathArgs) (*ToolRe
 		return NewError("Error: 'target' function name is required"), nil
 	}
 
-	// Safety limits to prevent hanging on large codebases
-	const maxNodesExplored = 5000    // Maximum nodes to visit in BFS
-	const maxQueriesPerSource = 1000 // Maximum getCallees queries per source
-
-	// pathNode represents a node in the BFS traversal
-	type pathNode struct {
-		funcName string
-		path     []TraceFuncInfo // path from source to this node
+	// Find source and target functions
+	sources, err := getTraceSources(ctx, client, args)
+	if err != nil {
+		return NewResult(err.Error()), nil
 	}
-
-	// Find source functions (entry points or specified source)
-	var sources []TraceFuncInfo
-	if args.Source == "" {
-		// Auto-detect entry points based on language conventions
-		sources = detectEntryPoints(ctx, client, args.PathPattern)
-		if len(sources) == 0 {
-			return NewResult("No entry points found. Try specifying a 'source' function explicitly."), nil
-		}
-	} else {
-		// Find specified source function
-		sources = findFunctionsByName(ctx, client, args.Source, args.PathPattern)
-		if len(sources) == 0 {
-			return NewResult(fmt.Sprintf("Source function '%s' not found.", args.Source)), nil
-		}
-	}
-
-	// Find target functions
 	targets := findFunctionsByName(ctx, client, args.Target, args.PathPattern)
 	if len(targets) == 0 {
 		return NewResult(fmt.Sprintf("Target function '%s' not found.", args.Target)), nil
@@ -85,140 +63,181 @@ func TracePath(ctx context.Context, client Querier, args TracePathArgs) (*ToolRe
 		targetSet[t.Name] = true
 	}
 
-	// BFS to find shortest paths from sources to target
-	var foundPaths [][]TraceFuncInfo
-	var searchLimitReached bool
-	totalNodesExplored := 0
+	// Run BFS search
+	searchResult := runTraceSearch(ctx, client, sources, targetSet, args)
+	if searchResult.cancelled {
+		return NewResult("Search cancelled (timeout or cancellation)."), nil
+	}
 
-	// Cache for getCallees to avoid duplicate queries
+	// Format and return output
+	if len(searchResult.paths) == 0 {
+		return NewResult(formatTraceNotFound(sources, args, searchResult)), nil
+	}
+	return NewResult(formatTraceOutput(sources, args, searchResult)), nil
+}
+
+// getTraceSources finds source functions for tracing.
+func getTraceSources(ctx context.Context, client Querier, args TracePathArgs) ([]TraceFuncInfo, error) {
+	if args.Source == "" {
+		sources := detectEntryPoints(ctx, client, args.PathPattern)
+		if len(sources) == 0 {
+			return nil, fmt.Errorf("no entry points found: try specifying a 'source' function explicitly")
+		}
+		return sources, nil
+	}
+	sources := findFunctionsByName(ctx, client, args.Source, args.PathPattern)
+	if len(sources) == 0 {
+		return nil, fmt.Errorf("source function %q not found", args.Source)
+	}
+	return sources, nil
+}
+
+// traceSearchResult holds the result of a trace search.
+type traceSearchResult struct {
+	paths        [][]TraceFuncInfo
+	nodesExplored int
+	limitReached bool
+	cancelled    bool
+}
+
+// pathNode represents a node in the BFS traversal.
+type pathNode struct {
+	funcName string
+	path     []TraceFuncInfo
+}
+
+// runTraceSearch performs BFS search from sources to targets.
+func runTraceSearch(ctx context.Context, client Querier, sources []TraceFuncInfo, targetSet map[string]bool, args TracePathArgs) traceSearchResult {
+	const maxNodesExplored = 5000
+	const maxQueriesPerSource = 1000
+
+	result := traceSearchResult{}
 	calleesCache := make(map[string][]TraceFuncInfo)
 
 	for _, src := range sources {
-		if len(foundPaths) >= args.MaxPaths {
+		if len(result.paths) >= args.MaxPaths {
 			break
 		}
-
-		// Check context cancellation
 		select {
 		case <-ctx.Done():
-			return NewResult("Search cancelled (timeout or cancellation)."), nil
+			result.cancelled = true
+			return result
 		default:
 		}
 
-		// BFS from this source
-		visited := make(map[string]bool)
-		queue := []pathNode{{
-			funcName: src.Name,
-			path:     []TraceFuncInfo{src},
-		}}
-		queriesThisSource := 0
-
-		for len(queue) > 0 && len(foundPaths) < args.MaxPaths {
-			// Check if we've hit safety limits
-			if totalNodesExplored >= maxNodesExplored || queriesThisSource >= maxQueriesPerSource {
-				searchLimitReached = true
-				break
-			}
-
-			// Check context cancellation periodically
-			if totalNodesExplored%100 == 0 {
-				select {
-				case <-ctx.Done():
-					return NewResult("Search cancelled (timeout or cancellation)."), nil
-				default:
-				}
-			}
-
-			current := queue[0]
-			queue = queue[1:]
-
-			if len(current.path) > args.MaxDepth {
-				continue
-			}
-
-			if visited[current.funcName] {
-				continue
-			}
-			visited[current.funcName] = true
-			totalNodesExplored++
-
-			// Check if we reached target
-			if targetSet[current.funcName] && len(current.path) > 1 {
-				foundPaths = append(foundPaths, current.path)
-				continue
-			}
-
-			// Get callees of current function (with caching)
-			callees, cached := calleesCache[current.funcName]
-			if !cached {
-				callees = getCallees(ctx, client, current.funcName)
-				calleesCache[current.funcName] = callees
-				queriesThisSource++
-			}
-
-			for _, callee := range callees {
-				if !visited[callee.Name] {
-					newPath := make([]TraceFuncInfo, len(current.path))
-					copy(newPath, current.path)
-					newPath = append(newPath, callee)
-					queue = append(queue, pathNode{
-						funcName: callee.Name,
-						path:     newPath,
-					})
-				}
-			}
-		}
-
-		if searchLimitReached {
+		srcResult := searchFromSource(ctx, client, src, targetSet, args, calleesCache, &result.nodesExplored, maxNodesExplored, maxQueriesPerSource)
+		result.paths = append(result.paths, srcResult.paths...)
+		if srcResult.limitReached {
+			result.limitReached = true
 			break
 		}
-	}
-
-	if len(foundPaths) == 0 {
-		output := fmt.Sprintf("No path found from %s to '%s' within depth %d.\n\n",
-			formatSources(sources, args.Source == ""), args.Target, args.MaxDepth)
-		output += fmt.Sprintf("_Explored %d nodes before stopping._\n\n", totalNodesExplored)
-		if searchLimitReached {
-			output += "**Note:** Search limit reached (explored 5000 nodes). The path may exist but wasn't found in the explored portion of the call graph.\n\n"
+		if srcResult.cancelled {
+			result.cancelled = true
+			return result
 		}
-		output += "**Tips:**\n"
-		output += "- Try increasing `max_depth` if the target is deeply nested\n"
-		output += "- Use `path_pattern` to narrow the search scope (e.g., `path_pattern=\"apps/core\"`)\n"
-		output += "- Check if the target function name is correct with `cie_find_function`\n"
-		output += "- Specify a `source` function closer to the target to reduce search space\n"
-		output += "- The call might be through an interface or dynamic dispatch (not statically traceable)\n"
-		return NewResult(output), nil
 	}
+	return result
+}
 
-	// Format output
-	output := fmt.Sprintf("## Call Paths to `%s`\n\n", args.Target)
-	output += fmt.Sprintf("Found %d path(s) from %s\n", len(foundPaths), formatSources(sources, args.Source == ""))
-	output += fmt.Sprintf("_Explored %d nodes._\n\n", totalNodesExplored)
+// searchFromSource performs BFS from a single source function.
+func searchFromSource(ctx context.Context, client Querier, src TraceFuncInfo, targetSet map[string]bool, args TracePathArgs, calleesCache map[string][]TraceFuncInfo, totalNodes *int, maxNodes, maxQueries int) traceSearchResult {
+	result := traceSearchResult{}
+	visited := make(map[string]bool)
+	queue := []pathNode{{funcName: src.Name, path: []TraceFuncInfo{src}}}
+	queries := 0
 
-	for i, path := range foundPaths {
-		output += fmt.Sprintf("### Path %d (depth: %d)\n\n", i+1, len(path)-1)
-		output += "```\n"
+	for len(queue) > 0 && len(result.paths) < args.MaxPaths {
+		if *totalNodes >= maxNodes || queries >= maxQueries {
+			result.limitReached = true
+			return result
+		}
+		if *totalNodes%100 == 0 {
+			select {
+			case <-ctx.Done():
+				result.cancelled = true
+				return result
+			default:
+			}
+		}
+
+		current := queue[0]
+		queue = queue[1:]
+
+		if len(current.path) > args.MaxDepth || visited[current.funcName] {
+			continue
+		}
+		visited[current.funcName] = true
+		*totalNodes++
+
+		if targetSet[current.funcName] && len(current.path) > 1 {
+			result.paths = append(result.paths, current.path)
+			continue
+		}
+
+		callees, cached := calleesCache[current.funcName]
+		if !cached {
+			callees = getCallees(ctx, client, current.funcName)
+			calleesCache[current.funcName] = callees
+			queries++
+		}
+
+		for _, callee := range callees {
+			if !visited[callee.Name] {
+				newPath := make([]TraceFuncInfo, len(current.path), len(current.path)+1)
+				copy(newPath, current.path)
+				queue = append(queue, pathNode{funcName: callee.Name, path: append(newPath, callee)})
+			}
+		}
+	}
+	return result
+}
+
+// formatTraceNotFound formats the output when no paths are found.
+func formatTraceNotFound(sources []TraceFuncInfo, args TracePathArgs, result traceSearchResult) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "No path found from %s to '%s' within depth %d.\n\n",
+		formatSources(sources, args.Source == ""), args.Target, args.MaxDepth)
+	fmt.Fprintf(&sb, "_Explored %d nodes before stopping._\n\n", result.nodesExplored)
+	if result.limitReached {
+		sb.WriteString("**Note:** Search limit reached (explored 5000 nodes). The path may exist but wasn't found in the explored portion of the call graph.\n\n")
+	}
+	sb.WriteString("**Tips:**\n")
+	sb.WriteString("- Try increasing `max_depth` if the target is deeply nested\n")
+	sb.WriteString("- Use `path_pattern` to narrow the search scope (e.g., `path_pattern=\"apps/core\"`)\n")
+	sb.WriteString("- Check if the target function name is correct with `cie_find_function`\n")
+	sb.WriteString("- Specify a `source` function closer to the target to reduce search space\n")
+	sb.WriteString("- The call might be through an interface or dynamic dispatch (not statically traceable)\n")
+	return sb.String()
+}
+
+// formatTraceOutput formats the output when paths are found.
+func formatTraceOutput(sources []TraceFuncInfo, args TracePathArgs, result traceSearchResult) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "## Call Paths to `%s`\n\n", args.Target)
+	fmt.Fprintf(&sb, "Found %d path(s) from %s\n", len(result.paths), formatSources(sources, args.Source == ""))
+	fmt.Fprintf(&sb, "_Explored %d nodes._\n\n", result.nodesExplored)
+
+	for i, path := range result.paths {
+		fmt.Fprintf(&sb, "### Path %d (depth: %d)\n\n```\n", i+1, len(path)-1)
 		for j, fn := range path {
 			indent := strings.Repeat("  ", j)
 			arrow := ""
 			if j > 0 {
 				arrow = "→ "
 			}
-			fileName := ExtractFileName(fn.FilePath)
-			output += fmt.Sprintf("%s%s%s\n", indent, arrow, fn.Name)
-			output += fmt.Sprintf("%s   %s:%s\n", indent, fileName, fn.Line)
+			fmt.Fprintf(&sb, "%s%s%s\n", indent, arrow, fn.Name)
+			fmt.Fprintf(&sb, "%s   %s:%s\n", indent, ExtractFileName(fn.FilePath), fn.Line)
 		}
-		output += "```\n\n"
+		sb.WriteString("```\n\n")
 	}
 
-	if len(foundPaths) >= args.MaxPaths {
-		output += fmt.Sprintf("*Showing first %d paths. Use `max_paths` to see more.*\n", args.MaxPaths)
+	if len(result.paths) >= args.MaxPaths {
+		fmt.Fprintf(&sb, "*Showing first %d paths. Use `max_paths` to see more.*\n", args.MaxPaths)
 	}
-	if searchLimitReached {
-		output += "\n**Note:** Search limit reached. There may be additional paths not shown.\n"
+	if result.limitReached {
+		sb.WriteString("\n**Note:** Search limit reached. There may be additional paths not shown.\n")
 	}
-
-	return NewResult(output), nil
+	return sb.String()
 }
 
 // detectEntryPoints finds entry point functions based on language conventions

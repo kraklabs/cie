@@ -29,6 +29,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/kraklabs/cie/pkg/ingestion"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -108,7 +109,7 @@ Options:
 		go func() {
 			mux := http.NewServeMux()
 			mux.Handle("/metrics", promhttp.Handler())
-			srv := &http.Server{Addr: *metricsAddr, Handler: mux}
+			srv := &http.Server{Addr: *metricsAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 			logger.Info("metrics.http.start", "addr", *metricsAddr, "path", "/metrics")
 			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				logger.Warn("metrics.http.error", "err", err)
@@ -190,7 +191,7 @@ func checkLocalData(cfg *Config) (bool, int, error) {
 func runLocalIndex(ctx context.Context, logger *slog.Logger, cfg *Config, repoPath, embeddingProvider string, embedWorkers int) {
 	// Ensure checkpoint directory exists
 	checkpointDir := filepath.Join(ConfigDir(repoPath), "checkpoints")
-	if err := os.MkdirAll(checkpointDir, 0755); err != nil {
+	if err := os.MkdirAll(checkpointDir, 0750); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: cannot create checkpoint directory: %v\n", err)
 		os.Exit(1)
 	}
@@ -222,13 +223,13 @@ func runLocalIndex(ctx context.Context, logger *slog.Logger, cfg *Config, repoPa
 	// Set embedding environment based on provider
 	switch embeddingProvider {
 	case "ollama":
-		os.Setenv("OLLAMA_BASE_URL", cfg.Embedding.BaseURL)
-		os.Setenv("OLLAMA_EMBED_MODEL", cfg.Embedding.Model)
+		_ = os.Setenv("OLLAMA_BASE_URL", cfg.Embedding.BaseURL)
+		_ = os.Setenv("OLLAMA_EMBED_MODEL", cfg.Embedding.Model)
 	case "openai":
-		os.Setenv("OPENAI_API_BASE", cfg.Embedding.BaseURL)
-		os.Setenv("OPENAI_EMBED_MODEL", cfg.Embedding.Model)
+		_ = os.Setenv("OPENAI_API_BASE", cfg.Embedding.BaseURL)
+		_ = os.Setenv("OPENAI_EMBED_MODEL", cfg.Embedding.Model)
 		if cfg.Embedding.APIKey != "" {
-			os.Setenv("OPENAI_API_KEY", cfg.Embedding.APIKey)
+			_ = os.Setenv("OPENAI_API_KEY", cfg.Embedding.APIKey)
 		}
 	}
 
@@ -237,7 +238,7 @@ func runLocalIndex(ctx context.Context, logger *slog.Logger, cfg *Config, repoPa
 		fmt.Fprintf(os.Stderr, "Error: create pipeline: %v\n", err)
 		os.Exit(1)
 	}
-	defer pipeline.Close()
+	defer func() { _ = pipeline.Close() }()
 
 	logger.Info("indexing.starting",
 		"mode", "local",

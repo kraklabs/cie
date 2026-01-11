@@ -161,8 +161,33 @@ func TestRoleFiltersForHNSW(t *testing.T) {
 }
 
 func TestPostFilterByPath(t *testing.T) {
-	// Create test rows: [name, file_path, signature, start_line, distance]
-	rows := [][]any{
+	rows := buildTestRows()
+	tests := buildPostFilterTestCases()
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := postFilterByPath(rows, tt.pathPattern, tt.role, tt.query, tt.excludePaths, tt.excludeAnonymous)
+			verifyPostFilterResults(t, got, tt)
+		})
+	}
+}
+
+// postFilterTestCase defines a test case for postFilterByPath.
+type postFilterTestCase struct {
+	name             string
+	pathPattern      string
+	role             string
+	query            string
+	excludePaths     string
+	excludeAnonymous bool
+	wantLen          int
+	wantContains     []string
+	wantExcludes     []string
+}
+
+// buildTestRows creates test data for post-filter tests.
+func buildTestRows() [][]any {
+	return [][]any{
 		{"HandleRequest", "internal/handler.go", "func HandleRequest()", 10, 0.1},
 		{"TestHandler", "internal/handler_test.go", "func TestHandler()", 1, 0.2},
 		{"MockService", "internal/mocks/service.go", "type MockService", 5, 0.3},
@@ -170,18 +195,11 @@ func TestPostFilterByPath(t *testing.T) {
 		{"$anon_1", "internal/utils.go", "func()", 20, 0.25},
 		{"$arrow_2", "src/component.ts", "() => {}", 30, 0.22},
 	}
+}
 
-	tests := []struct {
-		name             string
-		pathPattern      string
-		role             string
-		query            string
-		excludePaths     string
-		excludeAnonymous bool
-		wantLen          int
-		wantContains     []string
-		wantExcludes     []string
-	}{
+// buildPostFilterTestCases creates test cases for postFilterByPath.
+func buildPostFilterTestCases() []postFilterTestCase {
+	return []postFilterTestCase{
 		{
 			name:             "filter by path pattern",
 			pathPattern:      "routes",
@@ -192,14 +210,12 @@ func TestPostFilterByPath(t *testing.T) {
 		},
 		{
 			name:             "exclude tests with source role",
-			pathPattern:      "",
 			role:             "source",
 			excludeAnonymous: true,
 			wantExcludes:     []string{"TestHandler"},
 		},
 		{
 			name:             "exclude mocks by default",
-			pathPattern:      "",
 			role:             "source",
 			query:            "find handlers",
 			excludeAnonymous: true,
@@ -207,7 +223,6 @@ func TestPostFilterByPath(t *testing.T) {
 		},
 		{
 			name:             "include mocks when query mentions mock",
-			pathPattern:      "",
 			role:             "source",
 			query:            "find mock implementations",
 			excludeAnonymous: true,
@@ -215,60 +230,66 @@ func TestPostFilterByPath(t *testing.T) {
 		},
 		{
 			name:             "exclude anonymous functions",
-			pathPattern:      "",
 			role:             "source",
 			excludeAnonymous: true,
 			wantExcludes:     []string{"$anon_1", "$arrow_2"},
 		},
 		{
 			name:             "include anonymous when disabled",
-			pathPattern:      "",
 			role:             "any",
 			excludeAnonymous: false,
 			wantContains:     []string{"$anon_1", "$arrow_2"},
 		},
 		{
 			name:             "exclude custom path pattern",
-			pathPattern:      "",
 			role:             "source",
 			excludePaths:     "utils",
-			excludeAnonymous: false, // disable to not filter $anon_1 by name
+			excludeAnonymous: false,
 			wantExcludes:     []string{"$anon_1"},
 		},
 	}
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := postFilterByPath(rows, tt.pathPattern, tt.role, tt.query, tt.excludePaths, tt.excludeAnonymous)
+// verifyPostFilterResults checks test results against expectations.
+func verifyPostFilterResults(t *testing.T, got [][]any, tt postFilterTestCase) {
+	t.Helper()
 
-			if tt.wantLen > 0 && len(got) != tt.wantLen {
-				t.Errorf("postFilterByPath() returned %d rows, want %d", len(got), tt.wantLen)
-			}
-
-			// Check for expected names
-			for _, want := range tt.wantContains {
-				found := false
-				for _, row := range got {
-					if name, ok := row[0].(string); ok && name == want {
-						found = true
-						break
-					}
-				}
-				if !found {
-					t.Errorf("postFilterByPath() should contain %q", want)
-				}
-			}
-
-			// Check for excluded names
-			for _, exclude := range tt.wantExcludes {
-				for _, row := range got {
-					if name, ok := row[0].(string); ok && name == exclude {
-						t.Errorf("postFilterByPath() should exclude %q", exclude)
-					}
-				}
-			}
-		})
+	if tt.wantLen > 0 && len(got) != tt.wantLen {
+		t.Errorf("postFilterByPath() returned %d rows, want %d", len(got), tt.wantLen)
 	}
+
+	verifyContains(t, got, tt.wantContains)
+	verifyExcludes(t, got, tt.wantExcludes)
+}
+
+// verifyContains checks that all expected names are present.
+func verifyContains(t *testing.T, rows [][]any, wantContains []string) {
+	t.Helper()
+	for _, want := range wantContains {
+		if !rowsContainName(rows, want) {
+			t.Errorf("postFilterByPath() should contain %q", want)
+		}
+	}
+}
+
+// verifyExcludes checks that all excluded names are absent.
+func verifyExcludes(t *testing.T, rows [][]any, wantExcludes []string) {
+	t.Helper()
+	for _, exclude := range wantExcludes {
+		if rowsContainName(rows, exclude) {
+			t.Errorf("postFilterByPath() should exclude %q", exclude)
+		}
+	}
+}
+
+// rowsContainName checks if any row has the given name.
+func rowsContainName(rows [][]any, name string) bool {
+	for _, row := range rows {
+		if n, ok := row[0].(string); ok && n == name {
+			return true
+		}
+	}
+	return false
 }
 
 func TestBuildHNSWParams(t *testing.T) {

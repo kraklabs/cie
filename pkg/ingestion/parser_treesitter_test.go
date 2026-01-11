@@ -42,7 +42,7 @@ func main() {
 	outer()
 }
 `
-	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(content), 0600); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
 
@@ -101,7 +101,7 @@ func NewServer(port int) *Server {
 	return &Server{port: port}
 }
 `
-	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(content), 0600); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
 
@@ -174,7 +174,7 @@ func NewContainer[T any](v T) *Container[T] {
 	return &Container[T]{value: v}
 }
 `
-	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(content), 0600); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
 
@@ -235,7 +235,7 @@ func main() {
 	fmt.Println("main")
 }
 `
-	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(content), 0600); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
 
@@ -306,7 +306,7 @@ func anotherReal() {
 	*/
 }
 `
-	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(content), 0600); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
 
@@ -379,7 +379,7 @@ func (c *Container[T]) Set(v T) {
 	c.value = v
 }
 `
-	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(content), 0600); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
 
@@ -437,7 +437,7 @@ func } syntax {
 	error here
 }
 `
-	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(content), 0600); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
 
@@ -502,7 +502,7 @@ def nested_func():
         return 42
     return inner()
 `
-	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(content), 0600); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
 
@@ -572,7 +572,7 @@ class Calculator {
     console.log("IIFE");
 })();
 `
-	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(content), 0600); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
 
@@ -646,7 +646,7 @@ async function fetchData(url: string): Promise<string> {
     return await fetch(url).then(r => r.text());
 }
 `
-	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(content), 0600); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
 
@@ -691,7 +691,7 @@ func main() {
 	helper() // direct call
 }
 `
-	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(content), 0600); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
 
@@ -753,7 +753,7 @@ func main() {
 	calc.Multiply(2)
 }
 `
-	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(content), 0600); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
 
@@ -807,7 +807,7 @@ func fibonacci(n int) int {
 	return fibonacci(n-1) + fibonacci(n-2)
 }
 `
-	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(content), 0600); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
 
@@ -868,7 +868,7 @@ func NewFileReader(path string) *FileReader {
 	return &FileReader{path: path}
 }
 `
-	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(content), 0600); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
 
@@ -931,7 +931,7 @@ func complex() (result string, count int, err error) {
 	return "hello", 5, nil
 }
 `
-	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(content), 0600); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
 
@@ -993,7 +993,7 @@ func join(sep string, strs ...string) string {
 	return ""
 }
 `
-	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(content), 0600); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
 
@@ -1038,7 +1038,7 @@ func bar() {
 	println("bar")
 }
 `
-	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(content), 0600); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
 
@@ -1090,7 +1090,7 @@ func bar() {
 func TestTreeSitterParser_UnsupportedLanguage(t *testing.T) {
 	tmpFile := filepath.Join(t.TempDir(), "test.xyz")
 	content := `some content in unknown language`
-	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(content), 0600); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
 
@@ -1126,7 +1126,7 @@ func TestTreeSitterParser_LargeCodeText(t *testing.T) {
 func largeFunction() {
 ` + largeBody + `}
 `
-	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(content), 0600); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
 

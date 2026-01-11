@@ -71,131 +71,115 @@ type StubDetection struct {
 	Patterns []string
 }
 
+// stubPattern defines a pattern for detecting stub functions.
+type stubPattern struct {
+	pattern *regexp.Regexp
+	name    string
+	langs   []string // empty means all languages
+}
+
+// appliesToLang checks if the pattern applies to the given language.
+func (sp *stubPattern) appliesToLang(lang string) bool {
+	if len(sp.langs) == 0 {
+		return true
+	}
+	for _, l := range sp.langs {
+		if l == lang {
+			return true
+		}
+	}
+	return false
+}
+
+var strongStubPatterns = []stubPattern{
+	// Go
+	{regexp.MustCompile(`(?i)return\s+(fmt\.Errorf|errors\.New)\s*\(\s*["'].*not\s+implemented`), "returns 'not implemented' error", []string{"go"}},
+	{regexp.MustCompile(`(?i)panic\s*\(\s*["'].*not\s+implemented`), "panics with 'not implemented'", []string{"go"}},
+	{regexp.MustCompile(`(?i)return\s+ErrNotImplemented`), "returns ErrNotImplemented", []string{"go"}},
+	// Python
+	{regexp.MustCompile(`(?i)raise\s+NotImplementedError`), "raises NotImplementedError", []string{"python"}},
+	// Rust
+	{regexp.MustCompile(`(?i)\btodo!\s*\(`), "uses todo!()", []string{"rust"}},
+	{regexp.MustCompile(`(?i)\bunimplemented!\s*\(`), "uses unimplemented!()", []string{"rust"}},
+	// Java
+	{regexp.MustCompile(`(?i)throw\s+new\s+UnsupportedOperationException`), "throws UnsupportedOperationException", []string{"java"}},
+	// Generic
+	{regexp.MustCompile(`(?i)throw\s+new\s+Error\s*\(\s*["'].*not\s+implemented`), "throws 'not implemented' error", nil},
+	{regexp.MustCompile(`(?i)["']not\s+implemented["']`), "contains 'not implemented' string", nil},
+}
+
+var weakStubPatterns = []stubPattern{
+	// Go
+	{regexp.MustCompile(`^\s*return\s+nil\s*$`), "only returns nil", []string{"go"}},
+	{regexp.MustCompile(`^\s*return\s*$`), "empty return", []string{"go"}},
+	// Python
+	{regexp.MustCompile(`^\s*pass\s*$`), "only contains 'pass'", []string{"python"}},
+	{regexp.MustCompile(`^\s*\.\.\.\s*$`), "only contains '...' (ellipsis)", []string{"python"}},
+	{regexp.MustCompile(`^\s*return\s+None\s*$`), "only returns None", []string{"python"}},
+	// JS/TS
+	{regexp.MustCompile(`^\s*return\s*;\s*$`), "empty return", []string{"typescript", "javascript"}},
+	{regexp.MustCompile(`^\s*return\s+undefined\s*;?\s*$`), "returns undefined", []string{"typescript", "javascript"}},
+	{regexp.MustCompile(`^\s*return\s+null\s*;?\s*$`), "returns null", []string{"typescript", "javascript"}},
+}
+
 // detectStub analyzes function code to determine if it's likely a stub or not implemented.
-// Works across multiple languages (Go, Python, TypeScript, JavaScript, Rust, Java).
 func detectStub(code, filePath string) *StubDetection {
 	if code == "" {
 		return nil
 	}
-
-	// Determine language from file path
 	lang := detectLanguage(filePath)
 
-	var matchedPatterns []string
-
-	// STRONG indicators - always indicate stub regardless of code length
-	strongPatterns := []struct {
-		pattern *regexp.Regexp
-		name    string
-		langs   []string // empty means all languages
-	}{
-		// Go
-		{regexp.MustCompile(`(?i)return\s+(fmt\.Errorf|errors\.New)\s*\(\s*["'].*not\s+implemented`), "returns 'not implemented' error", []string{"go"}},
-		{regexp.MustCompile(`(?i)panic\s*\(\s*["'].*not\s+implemented`), "panics with 'not implemented'", []string{"go"}},
-		{regexp.MustCompile(`(?i)return\s+ErrNotImplemented`), "returns ErrNotImplemented", []string{"go"}},
-
-		// Python
-		{regexp.MustCompile(`(?i)raise\s+NotImplementedError`), "raises NotImplementedError", []string{"python"}},
-
-		// Rust
-		{regexp.MustCompile(`(?i)\btodo!\s*\(`), "uses todo!()", []string{"rust"}},
-		{regexp.MustCompile(`(?i)\bunimplemented!\s*\(`), "uses unimplemented!()", []string{"rust"}},
-
-		// Java
-		{regexp.MustCompile(`(?i)throw\s+new\s+UnsupportedOperationException`), "throws UnsupportedOperationException", []string{"java"}},
-
-		// Generic (all languages)
-		{regexp.MustCompile(`(?i)throw\s+new\s+Error\s*\(\s*["'].*not\s+implemented`), "throws 'not implemented' error", nil},
-		{regexp.MustCompile(`(?i)["']not\s+implemented["']`), "contains 'not implemented' string", nil},
-	}
-
-	for _, sp := range strongPatterns {
-		// Check if pattern applies to this language
-		if len(sp.langs) > 0 {
-			langMatch := false
-			for _, l := range sp.langs {
-				if l == lang {
-					langMatch = true
-					break
-				}
-			}
-			if !langMatch {
-				continue
-			}
-		}
-
-		if sp.pattern.MatchString(code) {
-			matchedPatterns = append(matchedPatterns, sp.name)
-		}
-	}
-
-	// If we found strong indicators, it's definitely a stub
-	if len(matchedPatterns) > 0 {
+	// Check strong indicators first
+	if matches := matchStubPatterns(code, lang, strongStubPatterns, false); len(matches) > 0 {
 		return &StubDetection{
 			IsStub:   true,
-			Reason:   fmt.Sprintf("Function %s", strings.Join(matchedPatterns, ", ")),
-			Patterns: matchedPatterns,
+			Reason:   fmt.Sprintf("Function %s", strings.Join(matches, ", ")),
+			Patterns: matches,
 		}
 	}
 
-	// WEAK indicators - only count if function is very short
+	// Check weak indicators only for short functions
 	codeLines := countCodeLines(code)
-
 	if codeLines <= 3 {
-		weakPatterns := []struct {
-			pattern *regexp.Regexp
-			name    string
-			langs   []string
-		}{
-			// Go - trivial returns
-			{regexp.MustCompile(`^\s*return\s+nil\s*$`), "only returns nil", []string{"go"}},
-			{regexp.MustCompile(`^\s*return\s*$`), "empty return", []string{"go"}},
-
-			// Python - empty body
-			{regexp.MustCompile(`^\s*pass\s*$`), "only contains 'pass'", []string{"python"}},
-			{regexp.MustCompile(`^\s*\.\.\.\s*$`), "only contains '...' (ellipsis)", []string{"python"}},
-			{regexp.MustCompile(`^\s*return\s+None\s*$`), "only returns None", []string{"python"}},
-
-			// JavaScript/TypeScript - empty or trivial
-			{regexp.MustCompile(`^\s*return\s*;\s*$`), "empty return", []string{"typescript", "javascript"}},
-			{regexp.MustCompile(`^\s*return\s+undefined\s*;?\s*$`), "returns undefined", []string{"typescript", "javascript"}},
-			{regexp.MustCompile(`^\s*return\s+null\s*;?\s*$`), "returns null", []string{"typescript", "javascript"}},
-		}
-
-		for _, wp := range weakPatterns {
-			if len(wp.langs) > 0 {
-				langMatch := false
-				for _, l := range wp.langs {
-					if l == lang {
-						langMatch = true
-						break
-					}
-				}
-				if !langMatch {
-					continue
-				}
-			}
-
-			// Check each line of code
-			lines := strings.Split(code, "\n")
-			for _, line := range lines {
-				if wp.pattern.MatchString(line) {
-					matchedPatterns = append(matchedPatterns, wp.name)
-					break
-				}
-			}
-		}
-
-		if len(matchedPatterns) > 0 {
+		if matches := matchStubPatterns(code, lang, weakStubPatterns, true); len(matches) > 0 {
 			return &StubDetection{
 				IsStub:   true,
-				Reason:   fmt.Sprintf("Very short function (%d lines) that %s", codeLines, strings.Join(matchedPatterns, ", ")),
-				Patterns: matchedPatterns,
+				Reason:   fmt.Sprintf("Very short function (%d lines) that %s", codeLines, strings.Join(matches, ", ")),
+				Patterns: matches,
 			}
 		}
 	}
 
 	return nil
+}
+
+// matchStubPatterns checks code against patterns, returning matched pattern names.
+func matchStubPatterns(code, lang string, patterns []stubPattern, perLine bool) []string {
+	var matches []string
+	for i := range patterns {
+		sp := &patterns[i]
+		if !sp.appliesToLang(lang) {
+			continue
+		}
+		if perLine {
+			if matchPatternPerLine(code, sp.pattern) {
+				matches = append(matches, sp.name)
+			}
+		} else if sp.pattern.MatchString(code) {
+			matches = append(matches, sp.name)
+		}
+	}
+	return matches
+}
+
+// matchPatternPerLine checks if pattern matches any line in code.
+func matchPatternPerLine(code string, pattern *regexp.Regexp) bool {
+	for _, line := range strings.Split(code, "\n") {
+		if pattern.MatchString(line) {
+			return true
+		}
+	}
+	return false
 }
 
 // countCodeLines counts non-empty, non-comment lines in code
@@ -247,6 +231,16 @@ func countCodeLines(code string) int {
 	return count
 }
 
+// analyzeState holds intermediate state during analysis.
+type analyzeState struct {
+	sections       []string
+	errors         []string
+	localizedFuncs []relevantFunction
+	globalFuncs    []relevantFunction
+	searchFailed   bool
+	args           AnalyzeArgs
+}
+
 // Analyze uses semantic search + LLM to answer architectural questions about the codebase
 func Analyze(ctx context.Context, client *CIEClient, args AnalyzeArgs) (*ToolResult, error) {
 	if args.Question == "" {
@@ -258,20 +252,29 @@ func Analyze(ctx context.Context, client *CIEClient, args AnalyzeArgs) (*ToolRes
 		args.Role = "source"
 	}
 
-	var sections []string
-	var errors []string
+	state := &analyzeState{args: args}
 
-	// Helper to run query with error tracking
-	runQuery := func(name, query string) *QueryResult {
-		result, err := client.Query(ctx, query)
-		if err != nil {
-			errors = append(errors, fmt.Sprintf("%s: %v", name, err))
-			return nil
-		}
-		return result
-	}
+	// Step 1: Get index stats
+	state.addIndexStats(ctx, client)
 
-	// Get basic stats
+	// Step 2: Perform semantic searches
+	state.performSemanticSearch(ctx, client)
+
+	// Step 3: Format semantic results
+	state.formatSemanticResults()
+
+	// Step 4: Fallback to keyword search if semantic failed
+	state.performKeywordFallback(ctx, client)
+
+	// Step 5: Run contextual keyword queries
+	state.runContextualQueries(ctx, client)
+
+	// Step 6: Build final output
+	return state.buildOutput(ctx, client)
+}
+
+// addIndexStats adds basic index statistics to sections.
+func (s *analyzeState) addIndexStats(ctx context.Context, client *CIEClient) {
 	fileCount := countWithFallback(ctx, client, "file count",
 		`?[count(f)] := *cie_file { id: f }`,
 		`?[id] := *cie_file { id } :limit 10000`)
@@ -282,186 +285,234 @@ func Analyze(ctx context.Context, client *CIEClient, args AnalyzeArgs) (*ToolRes
 	stats := "## Index Status\n"
 	stats += fmt.Sprintf("- Files indexed: %d\n", fileCount)
 	stats += fmt.Sprintf("- Functions indexed: %d\n", funcCount)
-	sections = append(sections, stats)
+	s.sections = append(s.sections, stats)
+}
 
-	// PRIMARY: Hybrid semantic search
-	// 1. If path_pattern specified: search WITHIN that path (localized)
-	// 2. Also search globally for broader context
-	var relevantFuncs []relevantFunction
-	var localizedFuncs []relevantFunction
-	semanticSearchFailed := false
-
-	if client.EmbeddingURL != "" && client.EmbeddingModel != "" {
-		// If path_pattern specified, do a LOCALIZED semantic search first
-		if args.PathPattern != "" {
-			funcs, err := findRelevantFunctionsLocalized(ctx, client, args.Question, args.PathPattern, args.Role, 10)
-			if err != nil {
-				errors = append(errors, fmt.Sprintf("localized semantic search: %v", err))
-			} else if len(funcs) > 0 {
-				localizedFuncs = funcs
-			}
-		}
-
-		// Also do a GLOBAL semantic search for broader context (limit to 5 if we have localized results)
-		globalLimit := 10
-		if len(localizedFuncs) > 0 {
-			globalLimit = 5
-		}
-		funcs, err := findRelevantFunctions(ctx, client, args.Question, "", args.Role, globalLimit)
-		if err != nil {
-			errors = append(errors, fmt.Sprintf("global semantic search: %v", err))
-		} else {
-			relevantFuncs = funcs
-		}
-
-		// If both searches returned nothing, mark as failed
-		if len(localizedFuncs) == 0 && len(relevantFuncs) == 0 {
-			semanticSearchFailed = true
-		}
-	} else {
-		errors = append(errors, fmt.Sprintf("embedding not configured (url=%q, model=%q) - using keyword fallback",
+// performSemanticSearch executes both localized and global semantic searches.
+func (s *analyzeState) performSemanticSearch(ctx context.Context, client *CIEClient) {
+	if client.EmbeddingURL == "" || client.EmbeddingModel == "" {
+		s.errors = append(s.errors, fmt.Sprintf("embedding not configured (url=%q, model=%q) - using keyword fallback",
 			client.EmbeddingURL, client.EmbeddingModel))
-		semanticSearchFailed = true
+		s.searchFailed = true
+		return
 	}
 
-	// Format localized semantic search results (priority)
-	if len(localizedFuncs) > 0 {
-		localSection := fmt.Sprintf("## Semantically Relevant (in %s)\n\n", args.PathPattern)
-		for i, f := range localizedFuncs {
-			stubMarker := ""
-			if f.StubInfo != nil && f.StubInfo.IsStub {
-				stubMarker = " [⚠️ STUB]"
-			}
-			localSection += fmt.Sprintf("%d. **%s**%s (%.0f%% similar)\n", i+1, f.Name, stubMarker, f.Similarity*100)
-			localSection += fmt.Sprintf("   - File: `%s:%s`\n", f.FilePath, f.StartLine)
-			if f.Signature != "" && len(f.Signature) < 120 {
-				localSection += fmt.Sprintf("   - Signature: `%s`\n", f.Signature)
-			}
-			if f.StubInfo != nil && f.StubInfo.IsStub {
-				localSection += fmt.Sprintf("   - ⚠️ **Not implemented:** %s\n", f.StubInfo.Reason)
-			}
-			localSection += "\n"
-		}
-		sections = append(sections, localSection)
-	}
-
-	// Format global semantic search results
-	if len(relevantFuncs) > 0 {
-		globalSection := "## Semantically Relevant (global)\n\n"
-		for i, f := range relevantFuncs {
-			stubMarker := ""
-			if f.StubInfo != nil && f.StubInfo.IsStub {
-				stubMarker = " [⚠️ STUB]"
-			}
-			globalSection += fmt.Sprintf("%d. **%s**%s (%.0f%% similar)\n", i+1, f.Name, stubMarker, f.Similarity*100)
-			globalSection += fmt.Sprintf("   - File: `%s:%s`\n", f.FilePath, f.StartLine)
-			if f.Signature != "" && len(f.Signature) < 120 {
-				globalSection += fmt.Sprintf("   - Signature: `%s`\n", f.Signature)
-			}
-			if f.StubInfo != nil && f.StubInfo.IsStub {
-				globalSection += fmt.Sprintf("   - ⚠️ **Not implemented:** %s\n", f.StubInfo.Reason)
-			}
-			globalSection += "\n"
-		}
-		sections = append(sections, globalSection)
-	}
-
-	// Merge localized + global for code context (localized first, they're more relevant)
-	allRelevantFuncs := append(localizedFuncs, relevantFuncs...)
-
-	// FALLBACK: If semantic search failed/unavailable, use keyword search on the question
-	questionLower := Query2Lower(args.Question)
-	if semanticSearchFailed {
-		terms := ExtractKeyTerms(args.Question)
-		if len(terms) > 0 {
-			// Build pattern from extracted terms
-			pattern := "(?i)(" + terms[0]
-			for i := 1; i < len(terms) && i < 5; i++ {
-				pattern += "|" + terms[i]
-			}
-			pattern += ")"
-
-			// Search in function names
-			query := fmt.Sprintf(`?[name, file_path, start_line] := *cie_function { name, file_path, start_line }, regex_matches(name, %q) :limit 30`, pattern)
-			if args.PathPattern != "" {
-				query = fmt.Sprintf(`?[name, file_path, start_line] := *cie_function { name, file_path, start_line }, regex_matches(name, %q), regex_matches(file_path, %q) :limit 30`, pattern, args.PathPattern)
-			}
-			if result := runQuery("keyword name search", query); result != nil && len(result.Rows) > 0 {
-				sections = append(sections, "## Functions Matching Keywords (name)\n"+FormatRows(result.Rows))
-			}
-
-			// Also search in function code
-			codeQuery := fmt.Sprintf(`?[name, file_path, start_line] := *cie_function { id, name, file_path, start_line }, *cie_function_code { function_id: id, code_text }, regex_matches(code_text, %q) :limit 30`, pattern)
-			if args.PathPattern != "" {
-				codeQuery = fmt.Sprintf(`?[name, file_path, start_line] := *cie_function { id, name, file_path, start_line }, *cie_function_code { function_id: id, code_text }, regex_matches(code_text, %q), regex_matches(file_path, %q) :limit 30`, pattern, args.PathPattern)
-			}
-			if result := runQuery("keyword code search", codeQuery); result != nil && len(result.Rows) > 0 {
-				sections = append(sections, "## Functions Matching Keywords (code)\n"+FormatRows(result.Rows))
-			}
+	// Localized search (if path specified)
+	if s.args.PathPattern != "" {
+		funcs, err := findRelevantFunctionsLocalized(ctx, client, s.args.Question, s.args.PathPattern, s.args.Role, 10)
+		if err != nil {
+			s.errors = append(s.errors, fmt.Sprintf("localized semantic search: %v", err))
+		} else if len(funcs) > 0 {
+			s.localizedFuncs = funcs
 		}
 	}
 
-	// ADDITIONAL: Run keyword-based queries for specific patterns
-	testExcludeFilter := ""
-	if args.Role == "source" {
-		testExcludeFilter = `, negate(regex_matches(file_path, "(?i)(_test[.]go|test[.]ts|test[.]js|_test[.]py|/tests/|/__tests__/)"))`
+	// Global search (reduced limit if localized succeeded)
+	globalLimit := 10
+	if len(s.localizedFuncs) > 0 {
+		globalLimit = 5
+	}
+	funcs, err := findRelevantFunctions(ctx, client, s.args.Question, "", s.args.Role, globalLimit)
+	if err != nil {
+		s.errors = append(s.errors, fmt.Sprintf("global semantic search: %v", err))
+	} else {
+		s.globalFuncs = funcs
 	}
 
-	// Entry points / main functions
+	// Mark as failed if both searches returned nothing
+	if len(s.localizedFuncs) == 0 && len(s.globalFuncs) == 0 {
+		s.searchFailed = true
+	}
+}
+
+// formatSemanticResults formats the semantic search results into sections.
+func (s *analyzeState) formatSemanticResults() {
+	if len(s.localizedFuncs) > 0 {
+		section := fmt.Sprintf("## Semantically Relevant (in %s)\n\n", s.args.PathPattern)
+		section += formatFunctionList(s.localizedFuncs)
+		s.sections = append(s.sections, section)
+	}
+
+	if len(s.globalFuncs) > 0 {
+		section := "## Semantically Relevant (global)\n\n"
+		section += formatFunctionList(s.globalFuncs)
+		s.sections = append(s.sections, section)
+	}
+}
+
+// formatFunctionList formats a list of relevant functions.
+func formatFunctionList(funcs []relevantFunction) string {
+	var result string
+	for i, f := range funcs {
+		stubMarker := ""
+		if f.StubInfo != nil && f.StubInfo.IsStub {
+			stubMarker = " [⚠️ STUB]"
+		}
+		result += fmt.Sprintf("%d. **%s**%s (%.0f%% similar)\n", i+1, f.Name, stubMarker, f.Similarity*100)
+		result += fmt.Sprintf("   - File: `%s:%s`\n", f.FilePath, f.StartLine)
+		if f.Signature != "" && len(f.Signature) < 120 {
+			result += fmt.Sprintf("   - Signature: `%s`\n", f.Signature)
+		}
+		if f.StubInfo != nil && f.StubInfo.IsStub {
+			result += fmt.Sprintf("   - ⚠️ **Not implemented:** %s\n", f.StubInfo.Reason)
+		}
+		result += "\n"
+	}
+	return result
+}
+
+// performKeywordFallback runs keyword search when semantic search fails.
+func (s *analyzeState) performKeywordFallback(ctx context.Context, client *CIEClient) {
+	if !s.searchFailed {
+		return
+	}
+
+	terms := ExtractKeyTerms(s.args.Question)
+	if len(terms) == 0 {
+		return
+	}
+
+	// Build pattern from extracted terms
+	pattern := buildKeywordPattern(terms)
+
+	// Search in function names
+	s.runKeywordNameSearch(ctx, client, pattern)
+
+	// Search in function code
+	s.runKeywordCodeSearch(ctx, client, pattern)
+}
+
+// buildKeywordPattern creates a regex pattern from key terms.
+func buildKeywordPattern(terms []string) string {
+	pattern := "(?i)(" + terms[0]
+	for i := 1; i < len(terms) && i < 5; i++ {
+		pattern += "|" + terms[i]
+	}
+	pattern += ")"
+	return pattern
+}
+
+// runKeywordNameSearch searches function names for keywords.
+func (s *analyzeState) runKeywordNameSearch(ctx context.Context, client *CIEClient, pattern string) {
+	query := fmt.Sprintf(`?[name, file_path, start_line] := *cie_function { name, file_path, start_line }, regex_matches(name, %q) :limit 30`, pattern)
+	if s.args.PathPattern != "" {
+		query = fmt.Sprintf(`?[name, file_path, start_line] := *cie_function { name, file_path, start_line }, regex_matches(name, %q), regex_matches(file_path, %q) :limit 30`, pattern, s.args.PathPattern)
+	}
+	if result := s.runQuery(ctx, client, "keyword name search", query); result != nil && len(result.Rows) > 0 {
+		s.sections = append(s.sections, "## Functions Matching Keywords (name)\n"+FormatRows(result.Rows))
+	}
+}
+
+// runKeywordCodeSearch searches function code for keywords.
+func (s *analyzeState) runKeywordCodeSearch(ctx context.Context, client *CIEClient, pattern string) {
+	query := fmt.Sprintf(`?[name, file_path, start_line] := *cie_function { id, name, file_path, start_line }, *cie_function_code { function_id: id, code_text }, regex_matches(code_text, %q) :limit 30`, pattern)
+	if s.args.PathPattern != "" {
+		query = fmt.Sprintf(`?[name, file_path, start_line] := *cie_function { id, name, file_path, start_line }, *cie_function_code { function_id: id, code_text }, regex_matches(code_text, %q), regex_matches(file_path, %q) :limit 30`, pattern, s.args.PathPattern)
+	}
+	if result := s.runQuery(ctx, client, "keyword code search", query); result != nil && len(result.Rows) > 0 {
+		s.sections = append(s.sections, "## Functions Matching Keywords (code)\n"+FormatRows(result.Rows))
+	}
+}
+
+// runContextualQueries runs keyword queries based on question context.
+func (s *analyzeState) runContextualQueries(ctx context.Context, client *CIEClient) {
+	questionLower := Query2Lower(s.args.Question)
+	testFilter := s.getTestExcludeFilter()
+
+	// Entry points
 	if ContainsAny(questionLower, []string{"entry", "main", "start", "begin", "bootstrap", "init"}) {
-		query := fmt.Sprintf(`?[name, file_path, start_line] := *cie_function { name, file_path, start_line }, name == "main"%s :limit 20`, testExcludeFilter)
-		if args.PathPattern != "" {
-			query = fmt.Sprintf(`?[name, file_path, start_line] := *cie_function { name, file_path, start_line }, name == "main", regex_matches(file_path, %q)%s :limit 20`, args.PathPattern, testExcludeFilter)
-		}
-		if result := runQuery("main functions", query); result != nil && len(result.Rows) > 0 {
-			sections = append(sections, "## Main Functions (Entry Points)\n"+FormatRows(result.Rows))
-		}
+		s.runEntryPointQuery(ctx, client, testFilter)
 	}
 
-	// Routes / endpoints / HTTP
+	// Routes/endpoints
 	if ContainsAny(questionLower, []string{"route", "endpoint", "http", "api", "rest", "url", "path"}) {
-		query := fmt.Sprintf(`?[name, file_path, start_line] := *cie_function { id, name, file_path, start_line }, *cie_function_code { function_id: id, code_text }, regex_matches(code_text, "[.](GET|POST|PUT|DELETE|PATCH|Handle)[(]")%s :limit 20`, testExcludeFilter)
-		if args.PathPattern != "" {
-			query = fmt.Sprintf(`?[name, file_path, start_line] := *cie_function { id, name, file_path, start_line }, *cie_function_code { function_id: id, code_text }, regex_matches(code_text, "[.](GET|POST|PUT|DELETE|PATCH|Handle)[(]"), regex_matches(file_path, %q)%s :limit 20`, args.PathPattern, testExcludeFilter)
-		}
-		if result := runQuery("route functions", query); result != nil && len(result.Rows) > 0 {
-			sections = append(sections, "## Functions with Route Definitions\n"+FormatRows(result.Rows))
-		}
+		s.runRouteQuery(ctx, client, testFilter)
 	}
 
-	// Architecture / structure
+	// Architecture/structure
 	if ContainsAny(questionLower, []string{"architect", "structure", "organiz", "layout", "folder", "director"}) {
-		query := `?[path] := *cie_file { path } :limit 100`
-		if args.PathPattern != "" {
-			query = fmt.Sprintf(`?[path] := *cie_file { path }, regex_matches(path, %q) :limit 100`, args.PathPattern)
-		}
-		if result := runQuery("files", query); result != nil && len(result.Rows) > 0 {
-			dirs := make(map[string]int)
-			for _, row := range result.Rows {
-				if fp, ok := row[0].(string); ok {
-					dir := ExtractDir(fp)
-					dirs[dir]++
-				}
-			}
-			dirList := "## Directory Structure\n"
-			for dir, count := range dirs {
-				dirList += fmt.Sprintf("- `%s/` (%d files)\n", dir, count)
-			}
-			sections = append(sections, dirList)
+		s.runArchitectureQuery(ctx, client)
+	}
+}
+
+// getTestExcludeFilter returns the test file exclusion filter.
+func (s *analyzeState) getTestExcludeFilter() string {
+	if s.args.Role == "source" {
+		return `, negate(regex_matches(file_path, "(?i)(_test[.]go|test[.]ts|test[.]js|_test[.]py|/tests/|/__tests__/)"))`
+	}
+	return ""
+}
+
+// runEntryPointQuery searches for main/entry point functions.
+func (s *analyzeState) runEntryPointQuery(ctx context.Context, client *CIEClient, testFilter string) {
+	query := fmt.Sprintf(`?[name, file_path, start_line] := *cie_function { name, file_path, start_line }, name == "main"%s :limit 20`, testFilter)
+	if s.args.PathPattern != "" {
+		query = fmt.Sprintf(`?[name, file_path, start_line] := *cie_function { name, file_path, start_line }, name == "main", regex_matches(file_path, %q)%s :limit 20`, s.args.PathPattern, testFilter)
+	}
+	if result := s.runQuery(ctx, client, "main functions", query); result != nil && len(result.Rows) > 0 {
+		s.sections = append(s.sections, "## Main Functions (Entry Points)\n"+FormatRows(result.Rows))
+	}
+}
+
+// runRouteQuery searches for HTTP route definitions.
+func (s *analyzeState) runRouteQuery(ctx context.Context, client *CIEClient, testFilter string) {
+	query := fmt.Sprintf(`?[name, file_path, start_line] := *cie_function { id, name, file_path, start_line }, *cie_function_code { function_id: id, code_text }, regex_matches(code_text, "[.](GET|POST|PUT|DELETE|PATCH|Handle)[(]")%s :limit 20`, testFilter)
+	if s.args.PathPattern != "" {
+		query = fmt.Sprintf(`?[name, file_path, start_line] := *cie_function { id, name, file_path, start_line }, *cie_function_code { function_id: id, code_text }, regex_matches(code_text, "[.](GET|POST|PUT|DELETE|PATCH|Handle)[(]"), regex_matches(file_path, %q)%s :limit 20`, s.args.PathPattern, testFilter)
+	}
+	if result := s.runQuery(ctx, client, "route functions", query); result != nil && len(result.Rows) > 0 {
+		s.sections = append(s.sections, "## Functions with Route Definitions\n"+FormatRows(result.Rows))
+	}
+}
+
+// runArchitectureQuery extracts directory structure.
+func (s *analyzeState) runArchitectureQuery(ctx context.Context, client *CIEClient) {
+	query := `?[path] := *cie_file { path } :limit 100`
+	if s.args.PathPattern != "" {
+		query = fmt.Sprintf(`?[path] := *cie_file { path }, regex_matches(path, %q) :limit 100`, s.args.PathPattern)
+	}
+	result := s.runQuery(ctx, client, "files", query)
+	if result == nil || len(result.Rows) == 0 {
+		return
+	}
+
+	dirs := make(map[string]int)
+	for _, row := range result.Rows {
+		if fp, ok := row[0].(string); ok {
+			dir := ExtractDir(fp)
+			dirs[dir]++
 		}
 	}
 
-	// Build response
-	output := fmt.Sprintf("# Analysis: %s\n\n", args.Question)
-	if args.PathPattern != "" {
-		output += fmt.Sprintf("_Scope: `%s`_\n\n", args.PathPattern)
+	dirList := "## Directory Structure\n"
+	for dir, count := range dirs {
+		dirList += fmt.Sprintf("- `%s/` (%d files)\n", dir, count)
 	}
-	if args.Role == "source" {
+	s.sections = append(s.sections, dirList)
+}
+
+// runQuery executes a query with error tracking.
+func (s *analyzeState) runQuery(ctx context.Context, client *CIEClient, name, query string) *QueryResult {
+	result, err := client.Query(ctx, query)
+	if err != nil {
+		s.errors = append(s.errors, fmt.Sprintf("%s: %v", name, err))
+		return nil
+	}
+	return result
+}
+
+// buildOutput constructs the final analysis output.
+func (s *analyzeState) buildOutput(ctx context.Context, client *CIEClient) (*ToolResult, error) {
+	output := fmt.Sprintf("# Analysis: %s\n\n", s.args.Question)
+	if s.args.PathPattern != "" {
+		output += fmt.Sprintf("_Scope: `%s`_\n\n", s.args.PathPattern)
+	}
+	if s.args.Role == "source" {
 		output += "_Filtering: excluding test files_\n\n"
 	}
 
 	// Check if we have meaningful results
-	if len(sections) <= 1 && len(relevantFuncs) == 0 {
+	if len(s.sections) <= 1 && len(s.globalFuncs) == 0 {
 		output += "**No relevant results found.**\n\n"
 		output += "### Suggestions:\n"
 		output += "- Try rephrasing your question\n"
@@ -469,30 +520,33 @@ func Analyze(ctx context.Context, client *CIEClient, args AnalyzeArgs) (*ToolRes
 		output += "- Use `cie_semantic_search` directly for more control\n\n"
 	}
 
-	for _, section := range sections {
+	for _, section := range s.sections {
 		output += section + "\n"
 	}
 
-	if len(errors) > 0 {
+	if len(s.errors) > 0 {
 		output += "\n---\n### Query Issues\n"
-		for _, e := range errors {
+		for _, e := range s.errors {
 			output += fmt.Sprintf("- %s\n", e)
 		}
 	}
 
+	// Merge localized + global for code context (localized first, they're more relevant)
+	allRelevantFuncs := append(s.localizedFuncs, s.globalFuncs...)
+
 	// Generate LLM narrative with code context
-	if client.LLMClient != nil && (len(sections) > 1 || len(allRelevantFuncs) > 0) {
+	if client.LLMClient != nil && (len(s.sections) > 1 || len(allRelevantFuncs) > 0) {
 		// Build enriched context with actual code
 		codeContext := buildCodeContext(allRelevantFuncs)
-		narrative, err := generateNarrativeWithCode(ctx, client.LLMClient, args.Question, output, codeContext, client.LLMMaxTokens)
+		narrative, err := generateNarrativeWithCode(ctx, client.LLMClient, s.args.Question, output, codeContext, client.LLMMaxTokens)
 		if err != nil {
 			output += fmt.Sprintf("\n---\n_LLM narrative generation failed: %v_\n", err)
 		} else if narrative != "" {
 			// Prepend narrative summary
-			output = fmt.Sprintf("# Analysis: %s\n\n", args.Question) +
+			output = fmt.Sprintf("# Analysis: %s\n\n", s.args.Question) +
 				narrative +
 				"\n\n---\n\n## Raw Analysis Data\n\n" +
-				strings.TrimPrefix(output, fmt.Sprintf("# Analysis: %s\n\n", args.Question))
+				strings.TrimPrefix(output, fmt.Sprintf("# Analysis: %s\n\n", s.args.Question))
 		}
 	} else if client.LLMClient == nil {
 		output += "\n---\n_Note: LLM not configured. Run `cie init` to enable narrative generation._\n"

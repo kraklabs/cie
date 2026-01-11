@@ -170,7 +170,7 @@ func TestOllamaProvider_Generate_WithMockServer(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/generate" {
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{
+			_, _ = w.Write([]byte(`{
 				"response": "This is a test response",
 				"model": "test-model",
 				"done": true,
@@ -217,7 +217,7 @@ func TestOllamaProvider_Chat_WithMockServer(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/chat" {
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{
+			_, _ = w.Write([]byte(`{
 				"message": {"role": "assistant", "content": "Hello! How can I help?"},
 				"model": "test-model",
 				"done": true,
@@ -261,7 +261,7 @@ func TestOpenAIProvider_Chat_WithMockServer(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/chat/completions" {
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{
+			_, _ = w.Write([]byte(`{
 				"choices": [{
 					"message": {"role": "assistant", "content": "OpenAI response"},
 					"finish_reason": "stop"

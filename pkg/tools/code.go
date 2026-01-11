@@ -86,9 +86,9 @@ func GetFunctionCode(ctx context.Context, client Querier, args GetFunctionCodeAr
 	sb.WriteString(fmt.Sprintf("```%s\n%s\n```", lang, codeText))
 
 	if truncated {
-		sb.WriteString(fmt.Sprintf("\n\n⚠️ **Code truncated**. To view full code:\n"))
+		sb.WriteString("\n\n⚠️ **Code truncated**. To view full code:\n")
 		sb.WriteString(fmt.Sprintf("- Use `Read` tool: `%s` (lines %v-%v)\n", filePath, startLine, endLine))
-		sb.WriteString(fmt.Sprintf("- Or call this tool with `full_code: true`"))
+		sb.WriteString("- Or call this tool with `full_code: true`")
 	}
 
 	return NewResult(sb.String()), nil
@@ -273,92 +273,81 @@ func GetFileSummary(ctx context.Context, client Querier, args GetFileSummaryArgs
 		return NewError("Error: file_path cannot be empty"), nil
 	}
 
-	escapedPath := EscapeRegex(filePath)
-
-	// Query 1: Get types (struct, interface, class, type_alias)
-	typeScript := fmt.Sprintf(`?[name, kind, start_line] := *cie_type { name, kind, file_path, start_line }, regex_matches(file_path, "(?i)%s") :order start_line :limit 100`, escapedPath)
-	typeResult, err := client.Query(ctx, typeScript)
-	if err != nil {
-		// Non-fatal, continue with functions
-		typeResult = &QueryResult{}
-	}
-
-	// Query 2: Get functions
-	funcScript := fmt.Sprintf(`?[name, signature, start_line] := *cie_function { name, signature, file_path, start_line }, regex_matches(file_path, "(?i)%s") :order start_line :limit 100`, escapedPath)
-	funcResult, err := client.Query(ctx, funcScript)
+	typeResult, funcResult, err := queryFileSummaryEntities(ctx, client, filePath)
 	if err != nil {
 		return NewError(fmt.Sprintf("Query error: %v", err)), nil
 	}
 
-	// Check if we have any results
-	totalTypes := len(typeResult.Rows)
-	totalFuncs := len(funcResult.Rows)
-	if totalTypes == 0 && totalFuncs == 0 {
+	if len(typeResult.Rows) == 0 && len(funcResult.Rows) == 0 {
 		return NewResult(fmt.Sprintf("No entities found in '%s'.", filePath)), nil
 	}
 
+	return NewResult(formatFileSummary(filePath, typeResult.Rows, funcResult.Rows)), nil
+}
+
+func queryFileSummaryEntities(ctx context.Context, client Querier, filePath string) (*QueryResult, *QueryResult, error) {
+	escapedPath := EscapeRegex(filePath)
+	typeScript := fmt.Sprintf(`?[name, kind, start_line] := *cie_type { name, kind, file_path, start_line }, regex_matches(file_path, "(?i)%s") :order start_line :limit 100`, escapedPath)
+	typeResult, _ := client.Query(ctx, typeScript)
+	if typeResult == nil {
+		typeResult = &QueryResult{}
+	}
+
+	funcScript := fmt.Sprintf(`?[name, signature, start_line] := *cie_function { name, signature, file_path, start_line }, regex_matches(file_path, "(?i)%s") :order start_line :limit 100`, escapedPath)
+	funcResult, err := client.Query(ctx, funcScript)
+	return typeResult, funcResult, err
+}
+
+func formatFileSummary(filePath string, typeRows, funcRows [][]any) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("# Summary of %s\n\n", filePath))
 
-	// Types section
-	if totalTypes > 0 {
-		sb.WriteString(fmt.Sprintf("## Types (%d)\n\n", totalTypes))
-		for _, row := range typeResult.Rows {
-			name := anyToStr(row[0])
-			kind := anyToStr(row[1])
-			line := row[2]
-			sb.WriteString(fmt.Sprintf("• **Line %v**: `%s` (%s)\n", line, name, kind))
-		}
-		sb.WriteString("\n")
-	}
+	formatFileSummaryTypes(&sb, typeRows)
+	formatFileSummaryFunctions(&sb, funcRows)
 
-	// Functions section - separate methods from standalone functions
-	if totalFuncs > 0 {
-		var methods [][]any
-		var functions [][]any
-
-		for _, row := range funcResult.Rows {
-			name := anyToStr(row[0])
-			// Methods have receiver in name: "Type.Method" or contain "."
-			if strings.Contains(name, ".") {
-				methods = append(methods, row)
-			} else {
-				functions = append(functions, row)
-			}
-		}
-
-		if len(functions) > 0 {
-			sb.WriteString(fmt.Sprintf("## Functions (%d)\n\n", len(functions)))
-			for _, row := range functions {
-				name := anyToStr(row[0])
-				signature := anyToStr(row[1])
-				line := row[2]
-				sb.WriteString(fmt.Sprintf("• **Line %v**: `%s`\n", line, name))
-				if len(signature) > 0 && len(signature) < 100 {
-					sb.WriteString(fmt.Sprintf("  `%s`\n", signature))
-				}
-			}
-			sb.WriteString("\n")
-		}
-
-		if len(methods) > 0 {
-			sb.WriteString(fmt.Sprintf("## Methods (%d)\n\n", len(methods)))
-			for _, row := range methods {
-				name := anyToStr(row[0])
-				signature := anyToStr(row[1])
-				line := row[2]
-				sb.WriteString(fmt.Sprintf("• **Line %v**: `%s`\n", line, name))
-				if len(signature) > 0 && len(signature) < 100 {
-					sb.WriteString(fmt.Sprintf("  `%s`\n", signature))
-				}
-			}
-			sb.WriteString("\n")
-		}
-	}
-
-	// Summary stats
 	sb.WriteString("---\n")
-	sb.WriteString(fmt.Sprintf("**Total**: %d types, %d functions/methods\n", totalTypes, totalFuncs))
+	sb.WriteString(fmt.Sprintf("**Total**: %d types, %d functions/methods\n", len(typeRows), len(funcRows)))
+	return sb.String()
+}
 
-	return NewResult(sb.String()), nil
+func formatFileSummaryTypes(sb *strings.Builder, rows [][]any) {
+	if len(rows) == 0 {
+		return
+	}
+	_, _ = fmt.Fprintf(sb, "## Types (%d)\n\n", len(rows))
+	for _, row := range rows {
+		_, _ = fmt.Fprintf(sb, "• **Line %v**: `%s` (%s)\n", row[2], anyToStr(row[0]), anyToStr(row[1]))
+	}
+	sb.WriteString("\n")
+}
+
+func formatFileSummaryFunctions(sb *strings.Builder, rows [][]any) {
+	if len(rows) == 0 {
+		return
+	}
+	var methods, functions [][]any
+	for _, row := range rows {
+		if strings.Contains(anyToStr(row[0]), ".") {
+			methods = append(methods, row)
+		} else {
+			functions = append(functions, row)
+		}
+	}
+	formatFuncSection(sb, "Functions", functions)
+	formatFuncSection(sb, "Methods", methods)
+}
+
+func formatFuncSection(sb *strings.Builder, title string, rows [][]any) {
+	if len(rows) == 0 {
+		return
+	}
+	_, _ = fmt.Fprintf(sb, "## %s (%d)\n\n", title, len(rows))
+	for _, row := range rows {
+		name, signature := anyToStr(row[0]), anyToStr(row[1])
+		_, _ = fmt.Fprintf(sb, "• **Line %v**: `%s`\n", row[2], name)
+		if len(signature) > 0 && len(signature) < 100 {
+			_, _ = fmt.Fprintf(sb, "  `%s`\n", signature)
+		}
+	}
+	sb.WriteString("\n")
 }

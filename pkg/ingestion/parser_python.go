@@ -222,7 +222,7 @@ func (p *TreeSitterParser) extractPythonLambda(node *sitter.Node, content []byte
 func (p *TreeSitterParser) extractPythonCalls(root *sitter.Node, content []byte, caller FunctionEntity, funcNameToID map[string]string) []CallsEdge {
 	var calls []CallsEdge
 
-	fnNode := findNodeAtPosition(root, uint32(caller.StartLine-1), uint32(caller.StartCol-1))
+	fnNode := findNodeAtPosition(root, uint32(caller.StartLine-1), uint32(caller.StartCol-1)) //nolint:gosec // G115: line/col from parsed source are bounded
 	if fnNode == nil {
 		return calls
 	}
@@ -454,90 +454,114 @@ func (p *Parser) extractPythonCallsSimplified(functions []FunctionEntity) []Call
 	return calls
 }
 
+// pythonParseState tracks state during Python code parsing.
+type pythonParseState struct {
+	code       string
+	pos        int
+	inString   bool
+	stringChar byte
+}
+
 // findPythonCalls extracts potential function call names from Python code.
 func (p *Parser) findPythonCalls(code string) []string {
 	var calls []string
-	inString := false
-	stringChar := byte(0)
-	inComment := false
+	state := &pythonParseState{code: code}
 
-	i := 0
-	for i < len(code) {
-		// Handle comments
-		if !inString && code[i] == '#' {
-			// Skip to end of line
-			for i < len(code) && code[i] != '\n' {
-				i++
-			}
+	for state.pos < len(code) {
+		if state.skipPythonComment() {
 			continue
 		}
-
-		// Handle triple-quoted strings
-		if !inString && i+2 < len(code) {
-			if (code[i] == '"' && code[i+1] == '"' && code[i+2] == '"') ||
-				(code[i] == '\'' && code[i+1] == '\'' && code[i+2] == '\'') {
-				stringChar = code[i]
-				i += 3
-				// Find closing triple quote
-				for i+2 < len(code) {
-					if code[i] == stringChar && code[i+1] == stringChar && code[i+2] == stringChar {
-						i += 3
-						break
-					}
-					i++
-				}
-				continue
-			}
-		}
-
-		// Handle strings
-		if !inString && (code[i] == '"' || code[i] == '\'') {
-			stringChar = code[i]
-			inString = true
-			i++
+		if state.skipPythonTripleQuote() {
 			continue
 		}
-		if inString && code[i] == stringChar && (i == 0 || code[i-1] != '\\') {
-			inString = false
-			i++
+		if state.handlePythonString() {
 			continue
 		}
-		if inString {
-			i++
+		if state.inString {
+			state.pos++
 			continue
 		}
-		if inComment {
-			i++
+		if call := state.extractPythonCall(); call != "" {
+			calls = append(calls, call)
 			continue
 		}
+		state.pos++
+	}
+	return calls
+}
 
-		// Look for identifier followed by (
-		if isPythonIdentStart(code[i]) {
-			start := i
-			for i < len(code) && isPythonIdentChar(code[i]) {
-				i++
-			}
-			name := code[start:i]
+// skipPythonComment skips a line comment if present.
+func (s *pythonParseState) skipPythonComment() bool {
+	if s.inString || s.pos >= len(s.code) || s.code[s.pos] != '#' {
+		return false
+	}
+	for s.pos < len(s.code) && s.code[s.pos] != '\n' {
+		s.pos++
+	}
+	return true
+}
 
-			// Skip whitespace
-			for i < len(code) && (code[i] == ' ' || code[i] == '\t') {
-				i++
-			}
-
-			// Check for ( - this is a function call
-			if i < len(code) && code[i] == '(' {
-				// Skip keywords and builtins
-				if !isPythonKeyword(name) {
-					calls = append(calls, name)
-				}
-			}
-			continue
+// skipPythonTripleQuote skips a triple-quoted string if present.
+func (s *pythonParseState) skipPythonTripleQuote() bool {
+	if s.inString || s.pos+2 >= len(s.code) {
+		return false
+	}
+	c := s.code[s.pos]
+	if (c != '"' && c != '\'') || s.code[s.pos+1] != c || s.code[s.pos+2] != c {
+		return false
+	}
+	s.pos += 3
+	for s.pos+2 < len(s.code) {
+		if s.code[s.pos] == c && s.code[s.pos+1] == c && s.code[s.pos+2] == c {
+			s.pos += 3
+			return true
 		}
+		s.pos++
+	}
+	return true
+}
 
-		i++
+// handlePythonString handles string start/end transitions.
+func (s *pythonParseState) handlePythonString() bool {
+	if s.pos >= len(s.code) {
+		return false
+	}
+	c := s.code[s.pos]
+	if !s.inString && (c == '"' || c == '\'') {
+		s.stringChar = c
+		s.inString = true
+		s.pos++
+		return true
+	}
+	if s.inString && c == s.stringChar && (s.pos == 0 || s.code[s.pos-1] != '\\') {
+		s.inString = false
+		s.pos++
+		return true
+	}
+	return false
+}
+
+// extractPythonCall extracts a function call if present at current position.
+func (s *pythonParseState) extractPythonCall() string {
+	if s.pos >= len(s.code) || !isPythonIdentStart(s.code[s.pos]) {
+		return ""
+	}
+	start := s.pos
+	for s.pos < len(s.code) && isPythonIdentChar(s.code[s.pos]) {
+		s.pos++
+	}
+	name := s.code[start:s.pos]
+
+	// Skip whitespace
+	for s.pos < len(s.code) && (s.code[s.pos] == ' ' || s.code[s.pos] == '\t') {
+		s.pos++
 	}
 
-	return calls
+	// Check for ( - this is a function call
+	if s.pos < len(s.code) && s.code[s.pos] == '(' && !isPythonKeyword(name) {
+		return name
+	}
+	return ""
 }
 
 // isPythonIdentStart checks if c can start a Python identifier.

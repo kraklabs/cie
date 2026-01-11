@@ -93,7 +93,7 @@ func NewCheckpointManager(checkpointPath string) *CheckpointManager {
 func (cm *CheckpointManager) LoadCheckpoint(projectID string) (*Checkpoint, error) {
 	path := cm.getCheckpointPath(projectID)
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path from checkpoint manager
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil // No checkpoint exists
@@ -134,7 +134,7 @@ func (cm *CheckpointManager) SaveCheckpoint(checkpoint *Checkpoint) error {
 
 	// Ensure directory exists
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0750); err != nil {
 		return fmt.Errorf("create checkpoint dir: %w", err)
 	}
 
@@ -145,7 +145,7 @@ func (cm *CheckpointManager) SaveCheckpoint(checkpoint *Checkpoint) error {
 
 	// Write atomically (temp file + rename)
 	tmpPath := path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
 		return fmt.Errorf("write checkpoint temp: %w", err)
 	}
 

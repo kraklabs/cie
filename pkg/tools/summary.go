@@ -47,114 +47,109 @@ func DirectorySummary(ctx context.Context, client Querier, path string, maxFuncs
 	if path == "" {
 		return NewError("Error: 'path' is required"), nil
 	}
+	path = normalizeDirPath(path)
 
-	// Normalize path - remove trailing slash
-	if len(path) > 0 && path[len(path)-1] == '/' {
-		path = path[:len(path)-1]
-	}
-
-	// 1. Get all files in the directory
-	// Use caret anchor for prefix match
-	filesQuery := fmt.Sprintf(`?[path] := *cie_file { path }, regex_matches(path, %q) :order path :limit 100`, "^"+EscapeRegex(path)+"/")
-	filesResult, err := client.Query(ctx, filesQuery)
+	filesResult, err := queryDirFiles(ctx, client, path)
 	if err != nil {
 		return nil, err
 	}
-
-	if len(filesResult.Rows) == 0 {
-		// Try without the ^ anchor in case it's a partial match
-		filesQuery = fmt.Sprintf(`?[path] := *cie_file { path }, regex_matches(path, %q) :order path :limit 100`, EscapeRegex(path))
-		filesResult, err = client.Query(ctx, filesQuery)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	if len(filesResult.Rows) == 0 {
 		return NewResult(fmt.Sprintf("No files found in path: `%s`\n\nUse `cie_list_files` to see available paths.", path)), nil
 	}
 
-	// 2. Get functions for each file (prioritize exported/public functions)
-	output := fmt.Sprintf("# Directory Summary: `%s`\n\n", path)
-	output += fmt.Sprintf("Found **%d files**\n\n", len(filesResult.Rows))
-
-	// Group files by subdirectory for better organization
-	filesByDir := make(map[string][]string)
+	output := fmt.Sprintf("# Directory Summary: `%s`\n\nFound **%d files**\n\n", path, len(filesResult.Rows))
 	for _, row := range filesResult.Rows {
 		filePath := AnyToString(row[0])
-		dir := ExtractDir(filePath)
-		filesByDir[dir] = append(filesByDir[dir], filePath)
+		output += formatFileSummaryEntry(ctx, client, filePath, maxFuncsPerFile)
 	}
-
-	// Process each file
-	for _, row := range filesResult.Rows {
-		filePath := AnyToString(row[0])
-
-		// Get functions for this file, prioritizing:
-		// 1. Exported functions (capitalized names in Go)
-		// 2. Public functions (no underscore prefix)
-		// 3. Shorter names (likely more important)
-		funcsQuery := fmt.Sprintf(`?[name, signature, start_line] := *cie_function { name, signature, start_line, file_path }, file_path == %q :order name :limit %d`, filePath, maxFuncsPerFile*2)
-		funcsResult, err := client.Query(ctx, funcsQuery)
-		if err != nil {
-			continue // Skip this file on error
-		}
-
-		// Format file entry
-		fileName := ExtractFileName(filePath)
-		output += fmt.Sprintf("## `%s`\n", fileName)
-		output += fmt.Sprintf("_Path: %s_\n\n", filePath)
-
-		if len(funcsResult.Rows) == 0 {
-			output += "_No functions found_\n\n"
-			continue
-		}
-
-		// Sort functions: exported first, then by name
-		type funcInfo struct {
-			name      string
-			signature string
-			line      string
-			exported  bool
-		}
-		var funcs []funcInfo
-		for _, frow := range funcsResult.Rows {
-			name := AnyToString(frow[0])
-			sig := AnyToString(frow[1])
-			line := AnyToString(frow[2])
-			exported := len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z'
-			funcs = append(funcs, funcInfo{name, sig, line, exported})
-		}
-
-		// Show exported functions first
-		shown := 0
-		for _, f := range funcs {
-			if f.exported && shown < maxFuncsPerFile {
-				sigShort := f.signature
-				if len(sigShort) > 80 {
-					sigShort = sigShort[:77] + "..."
-				}
-				output += fmt.Sprintf("- **%s** (line %s)\n", f.name, f.line)
-				if sigShort != "" && sigShort != f.name {
-					output += fmt.Sprintf("  `%s`\n", sigShort)
-				}
-				shown++
-			}
-		}
-
-		// Fill remaining slots with non-exported
-		for _, f := range funcs {
-			if !f.exported && shown < maxFuncsPerFile {
-				output += fmt.Sprintf("- %s (line %s)\n", f.name, f.line)
-				shown++
-			}
-		}
-
-		if len(funcsResult.Rows) > maxFuncsPerFile {
-			output += fmt.Sprintf("  _... and %d more functions_\n", len(funcsResult.Rows)-maxFuncsPerFile)
-		}
-		output += "\n"
-	}
-
 	return NewResult(output), nil
+}
+
+func normalizeDirPath(path string) string {
+	if len(path) > 0 && path[len(path)-1] == '/' {
+		return path[:len(path)-1]
+	}
+	return path
+}
+
+func queryDirFiles(ctx context.Context, client Querier, path string) (*QueryResult, error) {
+	query := fmt.Sprintf(`?[path] := *cie_file { path }, regex_matches(path, %q) :order path :limit 100`, "^"+EscapeRegex(path)+"/")
+	result, err := client.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	if len(result.Rows) == 0 {
+		query = fmt.Sprintf(`?[path] := *cie_file { path }, regex_matches(path, %q) :order path :limit 100`, EscapeRegex(path))
+		return client.Query(ctx, query)
+	}
+	return result, nil
+}
+
+type dirFuncInfo struct {
+	name, signature, line string
+	exported              bool
+}
+
+func formatFileSummaryEntry(ctx context.Context, client Querier, filePath string, maxFuncs int) string {
+	query := fmt.Sprintf(`?[name, signature, start_line] := *cie_function { name, signature, start_line, file_path }, file_path == %q :order name :limit %d`, filePath, maxFuncs*2)
+	result, err := client.Query(ctx, query)
+	if err != nil {
+		return ""
+	}
+
+	output := fmt.Sprintf("## `%s`\n_Path: %s_\n\n", ExtractFileName(filePath), filePath)
+	if len(result.Rows) == 0 {
+		return output + "_No functions found_\n\n"
+	}
+
+	funcs := parseDirFuncResults(result.Rows)
+	output += formatDirFuncs(funcs, maxFuncs)
+	if len(result.Rows) > maxFuncs {
+		output += fmt.Sprintf("  _... and %d more functions_\n", len(result.Rows)-maxFuncs)
+	}
+	return output + "\n"
+}
+
+func parseDirFuncResults(rows [][]any) []dirFuncInfo {
+	var funcs []dirFuncInfo
+	for _, row := range rows {
+		name := AnyToString(row[0])
+		funcs = append(funcs, dirFuncInfo{
+			name:      name,
+			signature: AnyToString(row[1]),
+			line:      AnyToString(row[2]),
+			exported:  len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z',
+		})
+	}
+	return funcs
+}
+
+func formatDirFuncs(funcs []dirFuncInfo, maxFuncs int) string {
+	var output string
+	shown := 0
+	for _, f := range funcs {
+		if f.exported && shown < maxFuncs {
+			output += formatExportedFunc(f)
+			shown++
+		}
+	}
+	for _, f := range funcs {
+		if !f.exported && shown < maxFuncs {
+			output += fmt.Sprintf("- %s (line %s)\n", f.name, f.line)
+			shown++
+		}
+	}
+	return output
+}
+
+func formatExportedFunc(f dirFuncInfo) string {
+	output := fmt.Sprintf("- **%s** (line %s)\n", f.name, f.line)
+	sigShort := f.signature
+	if len(sigShort) > 80 {
+		sigShort = sigShort[:77] + "..."
+	}
+	if sigShort != "" && sigShort != f.name {
+		output += fmt.Sprintf("  `%s`\n", sigShort)
+	}
+	return output
 }

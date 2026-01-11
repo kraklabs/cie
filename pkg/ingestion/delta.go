@@ -130,18 +130,44 @@ func (d *GitDelta) GetOldPath(newPath string) string {
 // If baseSHA is empty, compares headSHA against an empty tree (all files are "added").
 // If headSHA is empty, uses HEAD.
 func (dd *DeltaDetector) DetectDelta(baseSHA, headSHA string) (*GitDelta, error) {
-	// Validate inputs
+	resolvedBase, resolvedHead, err := dd.resolveRefs(baseSHA, headSHA)
+	if err != nil {
+		return nil, err
+	}
+
+	delta := &GitDelta{
+		BaseSHA: resolvedBase,
+		HeadSHA: resolvedHead,
+		Renamed: make(map[string]string),
+	}
+
+	output, err := dd.runGitDiff(resolvedBase, resolvedHead)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := dd.parseDiffOutput(output, delta); err != nil {
+		return nil, err
+	}
+
+	sortDeltaLists(delta)
+	rebuildAllList(delta)
+	dd.logDeltaComplete(resolvedBase, resolvedHead, delta)
+
+	return delta, nil
+}
+
+// resolveRefs resolves base and head refs to commit SHAs.
+func (dd *DeltaDetector) resolveRefs(baseSHA, headSHA string) (resolvedBase, resolvedHead string, err error) {
 	if headSHA == "" {
 		headSHA = "HEAD"
 	}
 
-	// Resolve HEADs to actual SHAs for logging
-	resolvedHead, err := dd.resolveRef(headSHA)
+	resolvedHead, err = dd.resolveRef(headSHA)
 	if err != nil {
-		return nil, fmt.Errorf("resolve head SHA: %w", err)
+		return "", "", fmt.Errorf("resolve head SHA: %w", err)
 	}
 
-	var resolvedBase string
 	if baseSHA == "" {
 		// Use empty tree SHA for initial commit comparison (all files are "added")
 		resolvedBase = "4b825dc642cb6eb9a060e54bf8d69288fbee4904" // Git's empty tree SHA
@@ -152,21 +178,16 @@ func (dd *DeltaDetector) DetectDelta(baseSHA, headSHA string) (*GitDelta, error)
 	} else {
 		resolvedBase, err = dd.resolveRef(baseSHA)
 		if err != nil {
-			return nil, fmt.Errorf("resolve base SHA: %w", err)
+			return "", "", fmt.Errorf("resolve base SHA: %w", err)
 		}
 	}
 
-	delta := &GitDelta{
-		BaseSHA: resolvedBase,
-		HeadSHA: resolvedHead,
-		Renamed: make(map[string]string),
-	}
+	return resolvedBase, resolvedHead, nil
+}
 
-	// Get diff with rename detection
-	// --name-status: shows A/M/D/R status
-	// -M: detect renames
-	// --no-renames is NOT used so we get rename info
-	cmd := exec.Command("git", "diff", "--name-status", "-M", resolvedBase, resolvedHead)
+// runGitDiff executes git diff with rename detection.
+func (dd *DeltaDetector) runGitDiff(resolvedBase, resolvedHead string) ([]byte, error) {
+	cmd := exec.Command("git", "diff", "--name-status", "-M", resolvedBase, resolvedHead) //nolint:gosec // G204: args are SHA hashes from git rev-parse
 	cmd.Dir = dd.repoPath
 
 	output, err := cmd.Output()
@@ -176,86 +197,49 @@ func (dd *DeltaDetector) DetectDelta(baseSHA, headSHA string) (*GitDelta, error)
 		}
 		return nil, fmt.Errorf("git diff: %w", err)
 	}
+	return output, nil
+}
 
-	// Parse output
+// parseDiffOutput parses git diff output into delta struct.
+func (dd *DeltaDetector) parseDiffOutput(output []byte, delta *GitDelta) error {
 	scanner := bufio.NewScanner(bytes.NewReader(output))
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
 			continue
 		}
+		dd.processDiffLine(line, delta)
+	}
+	return scanner.Err()
+}
 
-		status, paths := parseGitDiffLine(line)
-		if status == "" {
-			continue
+// processDiffLine handles a single line from git diff output.
+func (dd *DeltaDetector) processDiffLine(line string, delta *GitDelta) {
+	status, paths := parseGitDiffLine(line)
+	if status == "" || len(paths) == 0 {
+		return
+	}
+
+	switch status[0] {
+	case 'A':
+		delta.Added = append(delta.Added, paths[0])
+	case 'M':
+		delta.Modified = append(delta.Modified, paths[0])
+	case 'D':
+		delta.Deleted = append(delta.Deleted, paths[0])
+	case 'R':
+		if len(paths) >= 2 {
+			delta.Renamed[paths[0]] = paths[1]
 		}
-
-		switch status[0] {
-		case 'A':
-			delta.Added = append(delta.Added, paths[0])
-		case 'M':
-			delta.Modified = append(delta.Modified, paths[0])
-		case 'D':
-			delta.Deleted = append(delta.Deleted, paths[0])
-		case 'R':
-			// Rename: status is "R100" or "R95" (percentage), paths[0] = old, paths[1] = new
-			if len(paths) >= 2 {
-				delta.Renamed[paths[0]] = paths[1]
-			}
-		case 'C':
-			// Copy: treat as add
-			if len(paths) >= 2 {
-				delta.Added = append(delta.Added, paths[1])
-			}
+	case 'C':
+		if len(paths) >= 2 {
+			delta.Added = append(delta.Added, paths[1])
 		}
 	}
+}
 
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("parse git diff: %w", err)
-	}
-
-	// Ensure deterministic ordering per bucket before building All
-	sort.Strings(delta.Added)
-	sort.Strings(delta.Modified)
-	sort.Strings(delta.Deleted)
-	// Renames: build a sorted view of keys for determinism in logs/debug
-	if len(delta.Renamed) > 1 {
-		keys := make([]string, 0, len(delta.Renamed))
-		for k := range delta.Renamed {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		// Reinsert in a stable map order by recreating the map (Go maps are unordered,
-		// but this ensures any iteration we do locally over keys is stable).
-		ordered := make(map[string]string, len(delta.Renamed))
-		for _, k := range keys {
-			ordered[k] = delta.Renamed[k]
-		}
-		delta.Renamed = ordered
-	}
-
-	// Build All list (sorted, deduplicated)
-	allSet := make(map[string]bool)
-	for _, p := range delta.Added {
-		allSet[p] = true
-	}
-	for _, p := range delta.Modified {
-		allSet[p] = true
-	}
-	for _, p := range delta.Deleted {
-		allSet[p] = true
-	}
-	for oldPath, newPath := range delta.Renamed {
-		allSet[oldPath] = true
-		allSet[newPath] = true
-	}
-
-	delta.All = make([]string, 0, len(allSet))
-	for p := range allSet {
-		delta.All = append(delta.All, p)
-	}
-	sort.Strings(delta.All)
-
+// logDeltaComplete logs the completion of delta detection.
+func (dd *DeltaDetector) logDeltaComplete(resolvedBase, resolvedHead string, delta *GitDelta) {
 	dd.logger.Info("delta.detect.complete",
 		"base_sha", resolvedBase[:minInt(8, len(resolvedBase))],
 		"head_sha", resolvedHead[:minInt(8, len(resolvedHead))],
@@ -265,8 +249,6 @@ func (dd *DeltaDetector) DetectDelta(baseSHA, headSHA string) (*GitDelta, error)
 		"renamed", len(delta.Renamed),
 		"total_changed", len(delta.All),
 	)
-
-	return delta, nil
 }
 
 // parseGitDiffLine parses a line from git diff --name-status output.
@@ -343,136 +325,142 @@ func (dd *DeltaDetector) IsGitRepository() bool {
 // - maxFileSize: maximum file size in bytes (0 = no limit)
 // - repoPath: path to repository root (for checking file sizes)
 func FilterDelta(delta *GitDelta, excludeGlobs []string, maxFileSize int64, repoPath string) *GitDelta {
+	fc := &filterContext{excludeGlobs: excludeGlobs, maxFileSize: maxFileSize, repoPath: repoPath}
 	filtered := &GitDelta{
 		BaseSHA: delta.BaseSHA,
 		HeadSHA: delta.HeadSHA,
 		Renamed: make(map[string]string),
 	}
 
-	// shouldInclude checks glob patterns
-	shouldInclude := func(path string) bool {
-		// Check exclude globs
-		normalizedPath := filepath.ToSlash(path)
-		for _, pattern := range excludeGlobs {
-			if matchesGlob(normalizedPath, pattern) {
-				return false
-			}
-		}
-		return true
-	}
+	filtered.Added = fc.filterPaths(delta.Added, true)
+	filtered.Modified = fc.filterPaths(delta.Modified, true)
+	filtered.Deleted = fc.filterPaths(delta.Deleted, false)
+	fc.filterRenamed(delta.Renamed, filtered)
 
-	// checkFileEligible validates basic constraints (exists, regular file, size, textual)
-	checkFileEligible := func(path string) bool {
-		if maxFileSize <= 0 {
-			// still check for symlinks/dirs and binary
-		}
-		fullPath := filepath.Join(repoPath, path)
-		info, err := os.Lstat(fullPath)
-		if err != nil {
-			// File doesn't exist or can't be read - for deleted files this is expected
-			// For others, include and let later stages handle it
-			return true
-		}
-		// Skip directories and symlinks (potential submodules appear as gitlinks/symlinks)
-		if info.Mode()&os.ModeSymlink != 0 || info.IsDir() {
+	sortDeltaLists(filtered)
+	rebuildAllList(filtered)
+
+	return filtered
+}
+
+// filterContext holds filtering configuration for delta operations.
+type filterContext struct {
+	excludeGlobs []string
+	maxFileSize  int64
+	repoPath     string
+}
+
+// shouldInclude checks if path matches exclude glob patterns.
+func (fc *filterContext) shouldInclude(path string) bool {
+	normalizedPath := filepath.ToSlash(path)
+	for _, pattern := range fc.excludeGlobs {
+		if matchesGlob(normalizedPath, pattern) {
 			return false
 		}
-		if maxFileSize > 0 && info.Size() > maxFileSize {
-			return false
-		}
-		// Heuristic binary detection: scan first 8KB for NUL byte
-		f, err := os.Open(fullPath)
-		if err != nil {
-			// If we cannot open, let later stages handle it
-			return true
-		}
-		defer f.Close()
-		const sniff = 8192
-		buf := make([]byte, sniff)
-		n, _ := io.ReadFull(f, buf)
-		if n <= 0 {
-			return true
-		}
-		// If we find a NUL byte, treat as binary
-		if bytes.IndexByte(buf[:n], 0x00) >= 0 {
-			return false
-		}
-		return true
 	}
+	return true
+}
 
-	for _, p := range delta.Added {
-		if shouldInclude(p) && checkFileEligible(p) {
-			filtered.Added = append(filtered.Added, p)
-		}
+// checkFileEligible validates basic constraints (exists, regular file, size, textual).
+func (fc *filterContext) checkFileEligible(path string) bool {
+	fullPath := filepath.Join(fc.repoPath, path)
+	info, err := os.Lstat(fullPath)
+	if err != nil {
+		return true // File doesn't exist - let later stages handle it
 	}
-
-	for _, p := range delta.Modified {
-		if shouldInclude(p) && checkFileEligible(p) {
-			filtered.Modified = append(filtered.Modified, p)
-		}
+	if info.Mode()&os.ModeSymlink != 0 || info.IsDir() {
+		return false
 	}
-
-	// For deleted files, we always include them (no size check needed - file doesn't exist)
-	for _, p := range delta.Deleted {
-		if shouldInclude(p) {
-			filtered.Deleted = append(filtered.Deleted, p)
-		}
+	if fc.maxFileSize > 0 && info.Size() > fc.maxFileSize {
+		return false
 	}
+	return !isBinaryFile(fullPath)
+}
 
-	for oldPath, newPath := range delta.Renamed {
-		// If the new path is included and eligible, keep it as a rename
-		if shouldInclude(newPath) && checkFileEligible(newPath) {
+// isBinaryFile checks if file appears to be binary by scanning for NUL bytes.
+func isBinaryFile(fullPath string) bool {
+	f, err := os.Open(fullPath) //nolint:gosec // G304: path validated by caller
+	if err != nil {
+		return false // Can't open - let later stages handle it
+	}
+	defer func() { _ = f.Close() }()
+	const sniff = 8192
+	buf := make([]byte, sniff)
+	n, _ := io.ReadFull(f, buf)
+	if n <= 0 {
+		return false
+	}
+	return bytes.IndexByte(buf[:n], 0x00) >= 0
+}
+
+// filterPaths filters a slice of paths using include/eligibility checks.
+func (fc *filterContext) filterPaths(paths []string, checkEligible bool) []string {
+	var result []string
+	for _, p := range paths {
+		if !fc.shouldInclude(p) {
+			continue
+		}
+		if checkEligible && !fc.checkFileEligible(p) {
+			continue
+		}
+		result = append(result, p)
+	}
+	return result
+}
+
+// filterRenamed processes renamed files, converting ineligible renames to deletions.
+func (fc *filterContext) filterRenamed(renamed map[string]string, filtered *GitDelta) {
+	for oldPath, newPath := range renamed {
+		if fc.shouldInclude(newPath) && fc.checkFileEligible(newPath) {
 			filtered.Renamed[oldPath] = newPath
 			continue
 		}
-		// Otherwise, treat this as an effective deletion of the old path.
-		// Rationale: the file moved to an excluded/unsupported location; we
-		// must still clean the old indexed state to avoid stale entities.
-		if shouldInclude(oldPath) { // respect exclusions on the old path, too
+		if fc.shouldInclude(oldPath) {
 			filtered.Deleted = append(filtered.Deleted, oldPath)
 		}
 	}
+}
 
-	// Ensure deterministic ordering of each bucket after filtering
-	sort.Strings(filtered.Added)
-	sort.Strings(filtered.Modified)
-	sort.Strings(filtered.Deleted)
-	if len(filtered.Renamed) > 1 {
-		keys := make([]string, 0, len(filtered.Renamed))
-		for k := range filtered.Renamed {
+// sortDeltaLists ensures deterministic ordering of all lists.
+func sortDeltaLists(d *GitDelta) {
+	sort.Strings(d.Added)
+	sort.Strings(d.Modified)
+	sort.Strings(d.Deleted)
+	if len(d.Renamed) > 1 {
+		keys := make([]string, 0, len(d.Renamed))
+		for k := range d.Renamed {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
-		ordered := make(map[string]string, len(filtered.Renamed))
+		ordered := make(map[string]string, len(d.Renamed))
 		for _, k := range keys {
-			ordered[k] = filtered.Renamed[k]
+			ordered[k] = d.Renamed[k]
 		}
-		filtered.Renamed = ordered
+		d.Renamed = ordered
 	}
+}
 
-	// Rebuild All list
+// rebuildAllList reconstructs the All list from all buckets.
+func rebuildAllList(d *GitDelta) {
 	allSet := make(map[string]bool)
-	for _, p := range filtered.Added {
+	for _, p := range d.Added {
 		allSet[p] = true
 	}
-	for _, p := range filtered.Modified {
+	for _, p := range d.Modified {
 		allSet[p] = true
 	}
-	for _, p := range filtered.Deleted {
+	for _, p := range d.Deleted {
 		allSet[p] = true
 	}
-	for oldPath, newPath := range filtered.Renamed {
+	for oldPath, newPath := range d.Renamed {
 		allSet[oldPath] = true
 		allSet[newPath] = true
 	}
-
-	filtered.All = make([]string, 0, len(allSet))
+	d.All = make([]string, 0, len(allSet))
 	for p := range allSet {
-		filtered.All = append(filtered.All, p)
+		d.All = append(d.All, p)
 	}
-	sort.Strings(filtered.All)
-
-	return filtered
+	sort.Strings(d.All)
 }
 
 // =============================================================================

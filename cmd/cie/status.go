@@ -143,7 +143,7 @@ Options:
 		}
 		os.Exit(1)
 	}
-	defer backend.Close()
+	defer func() { _ = backend.Close() }()
 
 	result.Connected = true
 	ctx := context.Background()
@@ -202,7 +202,7 @@ func queryLocalCount(ctx context.Context, backend *storage.EmbeddedBackend, tabl
 func outputStatusJSON(result *StatusResult) {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
-	enc.Encode(result)
+	_ = enc.Encode(result)
 }
 
 // printLocalStatus prints the status result as formatted text to stdout.

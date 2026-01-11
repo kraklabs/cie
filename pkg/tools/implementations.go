@@ -136,101 +136,100 @@ func extractMethodNames(code string) []string {
 	return methods
 }
 
+// receiverData holds aggregated method data for a receiver type.
+type receiverData struct {
+	methods  []string
+	filePath string
+	line     string
+}
+
 // findTypesWithMethods finds types that have methods matching the given names.
 func findTypesWithMethods(ctx context.Context, client Querier, methods []string, pathPattern string, limit int) []implementationInfo {
 	if len(methods) == 0 {
 		return nil
 	}
 
-	// Build query to find functions that are methods (have receiver) with matching names
-	// We look for method names that match the interface methods
-	var conditions []string
+	receivers := make(map[string]*receiverData)
 	for _, method := range methods {
-		// Match functions ending with .MethodName (receiver methods)
-		conditions = append(conditions, fmt.Sprintf("ends_with(name, %q)", "."+method))
+		queryMethodReceivers(ctx, client, method, pathPattern, receivers)
 	}
 
-	// Query for each method and find common receiver types
-	receiverMethods := make(map[string][]string) // receiver -> [methods]
-	receiverFiles := make(map[string]string)     // receiver -> file
-	receiverLines := make(map[string]string)     // receiver -> line
-
-	for _, method := range methods {
-		query := fmt.Sprintf(
-			`?[name, file_path, start_line] :=
-			*cie_function { name, file_path, start_line },
-			ends_with(name, %q)`,
-			"."+method,
-		)
-		if pathPattern != "" {
-			query = fmt.Sprintf(
-				`?[name, file_path, start_line] :=
-				*cie_function { name, file_path, start_line },
-				ends_with(name, %q), regex_matches(file_path, %q)`,
-				"."+method, pathPattern,
-			)
-		}
-		query += " :limit 100"
-
-		result, err := client.Query(ctx, query)
-		if err != nil {
-			continue
-		}
-
-		for _, row := range result.Rows {
-			fullName := AnyToString(row[0])
-			filePath := AnyToString(row[1])
-			line := AnyToString(row[2])
-
-			// Extract receiver type from "ReceiverType.MethodName"
-			parts := strings.Split(fullName, ".")
-			if len(parts) >= 2 {
-				receiver := strings.Join(parts[:len(parts)-1], ".")
-				receiverMethods[receiver] = append(receiverMethods[receiver], method)
-				if _, ok := receiverFiles[receiver]; !ok {
-					receiverFiles[receiver] = filePath
-					receiverLines[receiver] = line
-				}
-			}
-		}
-	}
-
-	// Find receivers that have ALL methods
-	var implementations []implementationInfo
-	for receiver, methodList := range receiverMethods {
-		if len(methodList) >= len(methods) {
-			// Check if it has all required methods
-			hasAll := true
-			for _, m := range methods {
-				found := false
-				for _, rm := range methodList {
-					if rm == m {
-						found = true
-						break
-					}
-				}
-				if !found {
-					hasAll = false
-					break
-				}
-			}
-			if hasAll {
-				implementations = append(implementations, implementationInfo{
-					TypeName: receiver,
-					FilePath: receiverFiles[receiver],
-					Line:     receiverLines[receiver],
-					Methods:  methodList,
-				})
-			}
-		}
-	}
-
-	// Limit results
+	implementations := filterCompleteImplementations(receivers, methods)
 	if len(implementations) > limit {
-		implementations = implementations[:limit]
+		return implementations[:limit]
+	}
+	return implementations
+}
+
+func queryMethodReceivers(ctx context.Context, client Querier, method, pathPattern string, receivers map[string]*receiverData) {
+	query := buildMethodQuery(method, pathPattern)
+	result, err := client.Query(ctx, query)
+	if err != nil {
+		return
 	}
 
+	for _, row := range result.Rows {
+		extractReceiverFromRow(row, method, receivers)
+	}
+}
+
+func buildMethodQuery(method, pathPattern string) string {
+	if pathPattern != "" {
+		return fmt.Sprintf(
+			`?[name, file_path, start_line] := *cie_function { name, file_path, start_line }, ends_with(name, %q), regex_matches(file_path, %q) :limit 100`,
+			"."+method, pathPattern,
+		)
+	}
+	return fmt.Sprintf(
+		`?[name, file_path, start_line] := *cie_function { name, file_path, start_line }, ends_with(name, %q) :limit 100`,
+		"."+method,
+	)
+}
+
+func extractReceiverFromRow(row []any, method string, receivers map[string]*receiverData) {
+	fullName := AnyToString(row[0])
+	parts := strings.Split(fullName, ".")
+	if len(parts) < 2 {
+		return
+	}
+	receiver := strings.Join(parts[:len(parts)-1], ".")
+	data, exists := receivers[receiver]
+	if !exists {
+		data = &receiverData{filePath: AnyToString(row[1]), line: AnyToString(row[2])}
+		receivers[receiver] = data
+	}
+	data.methods = append(data.methods, method)
+}
+
+func filterCompleteImplementations(receivers map[string]*receiverData, requiredMethods []string) []implementationInfo {
+	var implementations []implementationInfo
+	for receiver, data := range receivers {
+		if hasAllMethods(data.methods, requiredMethods) {
+			implementations = append(implementations, implementationInfo{
+				TypeName: receiver,
+				FilePath: data.filePath,
+				Line:     data.line,
+				Methods:  data.methods,
+			})
+		}
+	}
 	return implementations
+}
+
+func hasAllMethods(haveMethods, requiredMethods []string) bool {
+	for _, req := range requiredMethods {
+		found := false
+		for _, have := range haveMethods {
+			if have == req {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }
 
 // findImplementationsByTextSearch uses text search as fallback.
@@ -259,13 +258,13 @@ func findImplementationsByTextSearch(ctx context.Context, client Querier, args F
 
 	tsResult, err := client.Query(ctx, tsQuery)
 	if err == nil && len(tsResult.Rows) > 0 {
-		sb.WriteString(fmt.Sprintf("**Found %d class(es) implementing `%s`:**\n\n", len(tsResult.Rows), args.InterfaceName))
+		fmt.Fprintf(sb, "**Found %d class(es) implementing `%s`:**\n\n", len(tsResult.Rows), args.InterfaceName)
 		for i, row := range tsResult.Rows {
 			name := AnyToString(row[0])
 			filePath := AnyToString(row[1])
 			line := AnyToString(row[2])
-			sb.WriteString(fmt.Sprintf("%d. **%s**\n", i+1, name))
-			sb.WriteString(fmt.Sprintf("   File: %s:%s\n\n", filePath, line))
+			fmt.Fprintf(sb, "%d. **%s**\n", i+1, name)
+			fmt.Fprintf(sb, "   File: %s:%s\n\n", filePath, line)
 		}
 		return NewResult(sb.String()), nil
 	}
@@ -282,20 +281,20 @@ func findImplementationsByTextSearch(ctx context.Context, client Querier, args F
 
 	goResult, err := client.Query(ctx, goQuery)
 	if err == nil && len(goResult.Rows) > 0 {
-		sb.WriteString(fmt.Sprintf("**Found %d function(s) referencing `%s` in signature:**\n\n", len(goResult.Rows), args.InterfaceName))
+		fmt.Fprintf(sb, "**Found %d function(s) referencing `%s` in signature:**\n\n", len(goResult.Rows), args.InterfaceName)
 		for i, row := range goResult.Rows {
 			name := AnyToString(row[0])
 			filePath := AnyToString(row[1])
 			line := AnyToString(row[2])
-			sb.WriteString(fmt.Sprintf("%d. **%s**\n", i+1, name))
-			sb.WriteString(fmt.Sprintf("   File: %s:%s\n\n", filePath, line))
+			fmt.Fprintf(sb, "%d. **%s**\n", i+1, name)
+			fmt.Fprintf(sb, "   File: %s:%s\n\n", filePath, line)
 		}
 		return NewResult(sb.String()), nil
 	}
 
 	sb.WriteString("No implementations found.\n\n")
 	sb.WriteString("**Tips:**\n")
-	sb.WriteString(fmt.Sprintf("- Use `cie_find_type` to find the interface: `%s`\n", args.InterfaceName))
+	fmt.Fprintf(sb, "- Use `cie_find_type` to find the interface: `%s`\n", args.InterfaceName)
 	sb.WriteString("- Use `cie_grep` to search for method signatures\n")
 	sb.WriteString("- The interface may be implemented in external packages\n")
 

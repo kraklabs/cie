@@ -61,161 +61,10 @@ func (e *ValidationError) Error() string {
 // Returns an error if validation fails.
 func ValidateEntities(files []FileEntity, functions []FunctionEntity, defines []DefinesEdge, calls []CallsEdge) error {
 	var errors []*ValidationError
-
-	// Validate files
-	for _, file := range files {
-		if file.ID == "" {
-			errors = append(errors, &ValidationError{
-				EntityType: "file",
-				EntityID:   file.Path,
-				Field:      "id",
-				Message:    "file ID cannot be empty",
-			})
-		}
-		if file.Path == "" {
-			errors = append(errors, &ValidationError{
-				EntityType: "file",
-				EntityID:   file.ID,
-				Field:      "path",
-				Message:    "file path cannot be empty",
-			})
-		}
-		if file.Hash == "" {
-			errors = append(errors, &ValidationError{
-				EntityType: "file",
-				EntityID:   file.ID,
-				Field:      "hash",
-				Message:    "file hash cannot be empty",
-			})
-		}
-	}
-
-	// Validate functions
-	embeddingDimension := -1
-	hasNonEmptyEmbeddings := false
-	hasEmptyEmbeddings := false
-
-	for _, fn := range functions {
-		if fn.ID == "" {
-			errors = append(errors, &ValidationError{
-				EntityType: "function",
-				EntityID:   fn.Name,
-				Field:      "id",
-				Message:    "function ID cannot be empty",
-			})
-		}
-		if fn.FilePath == "" {
-			errors = append(errors, &ValidationError{
-				EntityType: "function",
-				EntityID:   fn.ID,
-				Field:      "file_path",
-				Message:    "function file_path cannot be empty",
-			})
-		}
-		// Validate embedding dimension consistency and values
-		if fn.Embedding != nil {
-			dim := len(fn.Embedding)
-			if dim == 0 {
-				hasEmptyEmbeddings = true
-			} else {
-				hasNonEmptyEmbeddings = true
-			}
-
-			if embeddingDimension == -1 && dim > 0 {
-				embeddingDimension = dim
-			} else if dim != embeddingDimension && dim > 0 {
-				// Require strict consistency for all non-empty embeddings
-				errors = append(errors, &ValidationError{
-					EntityType: "function",
-					EntityID:   fn.ID,
-					Field:      "embedding",
-					Message:    fmt.Sprintf("embedding dimension mismatch: expected %d, got %d", embeddingDimension, dim),
-				})
-			}
-			// Validate embedding values: no NaN or Inf
-			for i, v := range fn.Embedding {
-				if math.IsNaN(float64(v)) {
-					errors = append(errors, &ValidationError{
-						EntityType: "function",
-						EntityID:   fn.ID,
-						Field:      "embedding",
-						Message:    fmt.Sprintf("embedding contains NaN at index %d", i),
-					})
-					break // One error is enough to indicate the problem
-				}
-				if math.IsInf(float64(v), 0) {
-					errors = append(errors, &ValidationError{
-						EntityType: "function",
-						EntityID:   fn.ID,
-						Field:      "embedding",
-						Message:    fmt.Sprintf("embedding contains Inf at index %d", i),
-					})
-					break // One error is enough to indicate the problem
-				}
-			}
-		}
-		// Validate line numbers
-		if fn.StartLine < 1 {
-			errors = append(errors, &ValidationError{
-				EntityType: "function",
-				EntityID:   fn.ID,
-				Field:      "start_line",
-				Message:    "start_line must be >= 1",
-			})
-		}
-		if fn.EndLine < fn.StartLine {
-			errors = append(errors, &ValidationError{
-				EntityType: "function",
-				EntityID:   fn.ID,
-				Field:      "end_line",
-				Message:    "end_line must be >= start_line",
-			})
-		}
-	}
-
-	// Note: Empty embeddings are now padded to 1536-dimensional zero vectors
-	// for HNSW compatibility, so inconsistent state is no longer an error
-	_ = hasEmptyEmbeddings && hasNonEmptyEmbeddings // suppress unused warning
-
-	// Validate defines edges
-	for i, edge := range defines {
-		if edge.FileID == "" {
-			errors = append(errors, &ValidationError{
-				EntityType: "defines",
-				EntityID:   fmt.Sprintf("edge_%d", i),
-				Field:      "file_id",
-				Message:    "file_id cannot be empty",
-			})
-		}
-		if edge.FunctionID == "" {
-			errors = append(errors, &ValidationError{
-				EntityType: "defines",
-				EntityID:   fmt.Sprintf("edge_%d", i),
-				Field:      "function_id",
-				Message:    "function_id cannot be empty",
-			})
-		}
-	}
-
-	// Validate calls edges
-	for i, edge := range calls {
-		if edge.CallerID == "" {
-			errors = append(errors, &ValidationError{
-				EntityType: "calls",
-				EntityID:   fmt.Sprintf("edge_%d", i),
-				Field:      "caller_id",
-				Message:    "caller_id cannot be empty",
-			})
-		}
-		if edge.CalleeID == "" {
-			errors = append(errors, &ValidationError{
-				EntityType: "calls",
-				EntityID:   fmt.Sprintf("edge_%d", i),
-				Field:      "callee_id",
-				Message:    "callee_id cannot be empty",
-			})
-		}
-	}
+	errors = append(errors, validateFiles(files)...)
+	errors = append(errors, validateFunctions(functions)...)
+	errors = append(errors, validateDefinesEdges(defines)...)
+	errors = append(errors, validateCallsEdges(calls)...)
 
 	if len(errors) > 0 {
 		var msgs []string
@@ -224,8 +73,105 @@ func ValidateEntities(files []FileEntity, functions []FunctionEntity, defines []
 		}
 		return fmt.Errorf("validation failed with %d error(s):\n%s", len(errors), strings.Join(msgs, "\n"))
 	}
-
 	return nil
+}
+
+func validateFiles(files []FileEntity) []*ValidationError {
+	var errors []*ValidationError
+	for _, file := range files {
+		if file.ID == "" {
+			errors = append(errors, &ValidationError{EntityType: "file", EntityID: file.Path, Field: "id", Message: "file ID cannot be empty"})
+		}
+		if file.Path == "" {
+			errors = append(errors, &ValidationError{EntityType: "file", EntityID: file.ID, Field: "path", Message: "file path cannot be empty"})
+		}
+		if file.Hash == "" {
+			errors = append(errors, &ValidationError{EntityType: "file", EntityID: file.ID, Field: "hash", Message: "file hash cannot be empty"})
+		}
+	}
+	return errors
+}
+
+func validateFunctions(functions []FunctionEntity) []*ValidationError {
+	var errors []*ValidationError
+	embeddingDimension := -1
+
+	for _, fn := range functions {
+		errors = append(errors, validateFunctionBasic(fn)...)
+		embErrors, dim := validateFunctionEmbedding(fn, embeddingDimension)
+		errors = append(errors, embErrors...)
+		if dim > 0 && embeddingDimension == -1 {
+			embeddingDimension = dim
+		}
+	}
+	return errors
+}
+
+func validateFunctionBasic(fn FunctionEntity) []*ValidationError {
+	var errors []*ValidationError
+	if fn.ID == "" {
+		errors = append(errors, &ValidationError{EntityType: "function", EntityID: fn.Name, Field: "id", Message: "function ID cannot be empty"})
+	}
+	if fn.FilePath == "" {
+		errors = append(errors, &ValidationError{EntityType: "function", EntityID: fn.ID, Field: "file_path", Message: "function file_path cannot be empty"})
+	}
+	if fn.StartLine < 1 {
+		errors = append(errors, &ValidationError{EntityType: "function", EntityID: fn.ID, Field: "start_line", Message: "start_line must be >= 1"})
+	}
+	if fn.EndLine < fn.StartLine {
+		errors = append(errors, &ValidationError{EntityType: "function", EntityID: fn.ID, Field: "end_line", Message: "end_line must be >= start_line"})
+	}
+	return errors
+}
+
+func validateFunctionEmbedding(fn FunctionEntity, expectedDim int) ([]*ValidationError, int) {
+	if fn.Embedding == nil {
+		return nil, 0
+	}
+	var errors []*ValidationError
+	dim := len(fn.Embedding)
+
+	if dim > 0 && expectedDim > 0 && dim != expectedDim {
+		errors = append(errors, &ValidationError{EntityType: "function", EntityID: fn.ID, Field: "embedding", Message: fmt.Sprintf("embedding dimension mismatch: expected %d, got %d", expectedDim, dim)})
+	}
+
+	for i, v := range fn.Embedding {
+		if math.IsNaN(float64(v)) {
+			errors = append(errors, &ValidationError{EntityType: "function", EntityID: fn.ID, Field: "embedding", Message: fmt.Sprintf("embedding contains NaN at index %d", i)})
+			break
+		}
+		if math.IsInf(float64(v), 0) {
+			errors = append(errors, &ValidationError{EntityType: "function", EntityID: fn.ID, Field: "embedding", Message: fmt.Sprintf("embedding contains Inf at index %d", i)})
+			break
+		}
+	}
+	return errors, dim
+}
+
+func validateDefinesEdges(defines []DefinesEdge) []*ValidationError {
+	var errors []*ValidationError
+	for i, edge := range defines {
+		if edge.FileID == "" {
+			errors = append(errors, &ValidationError{EntityType: "defines", EntityID: fmt.Sprintf("edge_%d", i), Field: "file_id", Message: "file_id cannot be empty"})
+		}
+		if edge.FunctionID == "" {
+			errors = append(errors, &ValidationError{EntityType: "defines", EntityID: fmt.Sprintf("edge_%d", i), Field: "function_id", Message: "function_id cannot be empty"})
+		}
+	}
+	return errors
+}
+
+func validateCallsEdges(calls []CallsEdge) []*ValidationError {
+	var errors []*ValidationError
+	for i, edge := range calls {
+		if edge.CallerID == "" {
+			errors = append(errors, &ValidationError{EntityType: "calls", EntityID: fmt.Sprintf("edge_%d", i), Field: "caller_id", Message: "caller_id cannot be empty"})
+		}
+		if edge.CalleeID == "" {
+			errors = append(errors, &ValidationError{EntityType: "calls", EntityID: fmt.Sprintf("edge_%d", i), Field: "callee_id", Message: "callee_id cannot be empty"})
+		}
+	}
+	return errors
 }
 
 // BuildMutations generates Datalog :put statements for all entities.

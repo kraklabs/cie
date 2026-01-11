@@ -88,43 +88,17 @@ type ListEndpointsArgs struct {
 //
 // Returns an error if the query execution fails.
 func ListEndpoints(ctx context.Context, client Querier, args ListEndpointsArgs) (*ToolResult, error) {
-	type endpoint struct {
-		Method   string
-		Path     string
-		Handler  string
-		FilePath string
-		Line     string
-	}
-	var endpoints []endpoint
-
-	// Pattern that matches HTTP method calls across common frameworks:
-	// - Gin/Echo: .GET(, .POST(, etc.
-	// - Chi: .Get(, .Post(, etc.
-	// - net/http: HandleFunc(, Handle(
-	// Uses raw string notation ___"..."___ for CozoDB compatibility
-	httpMethodPattern := `([.](GET|POST|PUT|DELETE|PATCH|Get|Post|Put|Delete|Patch|Group|Any)[(]|Handle(Func)?[(])`
-
-	// Build conditions for path filter and test exclusion
-	// Aggressively filter test files using [.] instead of \. for CozoDB raw strings
-	var conditions []string
-	conditions = append(conditions, fmt.Sprintf("regex_matches(code_text, %s)", QuoteCozoPattern(httpMethodPattern)))
-	if args.PathPattern != "" {
-		conditions = append(conditions, fmt.Sprintf("regex_matches(file_path, %s)", QuoteCozoPattern(args.PathPattern)))
-	}
-	conditions = append(conditions, `!regex_matches(file_path, ___"(_test[.]go|/tests?/|_test/|/test_)"___)`)
-
-	conditionStr := conditions[0]
-	for i := 1; i < len(conditions); i++ {
-		conditionStr += ", " + conditions[i]
+	if args.Limit <= 0 {
+		args.Limit = 100
 	}
 
-	// Query with generous limit since we'll parse and filter
+	// Query functions that contain HTTP method patterns
+	conditionStr := buildEndpointQueryConditions(args)
 	queryLimit := args.Limit * 3
 	if queryLimit > 500 {
 		queryLimit = 500
 	}
 
-	// Schema v3: Join with cie_function_code to get code_text
 	script := fmt.Sprintf(
 		"?[file_path, name, start_line, code_text] := *cie_function { id, file_path, name, start_line }, *cie_function_code { function_id: id, code_text }, %s :limit %d",
 		conditionStr, queryLimit,
@@ -136,162 +110,69 @@ func ListEndpoints(ctx context.Context, client Querier, args ListEndpointsArgs) 
 	}
 
 	// Parse endpoints from matching functions
+	var endpoints []endpoint
 	for _, row := range result.Rows {
 		filePath := AnyToString(row[0])
 		funcName := AnyToString(row[1])
 		startLine := AnyToString(row[2])
 		codeText := AnyToString(row[3])
-
-		// Try each HTTP pattern to extract endpoints
-		for _, p := range httpMethodPatterns {
-			matches := p.pattern.FindAllStringSubmatch(codeText, -1)
-			for _, match := range matches {
-				var httpMethod, httpPath string
-
-				if p.methodIndex > 0 && p.methodIndex < len(match) {
-					httpMethod = strings.ToUpper(match[p.methodIndex])
-				} else {
-					httpMethod = "ANY"
-				}
-
-				if p.pathIndex > 0 && p.pathIndex < len(match) {
-					httpPath = match[p.pathIndex]
-				}
-
-				if httpPath == "" {
-					continue
-				}
-
-				// Apply method filter if specified
-				if args.Method != "" && httpMethod != strings.ToUpper(args.Method) && httpMethod != "ANY" {
-					continue
-				}
-
-				// Apply endpoint path filter if specified
-				if args.PathFilter != "" && !strings.Contains(strings.ToLower(httpPath), strings.ToLower(args.PathFilter)) {
-					continue
-				}
-
-				endpoints = append(endpoints, endpoint{
-					Method:   httpMethod,
-					Path:     httpPath,
-					Handler:  funcName,
-					FilePath: filePath,
-					Line:     startLine,
-				})
-			}
-		}
+		endpoints = append(endpoints, parseEndpointsFromCode(codeText, filePath, funcName, startLine, args)...)
 	}
 
-	// Deduplicate endpoints
-	seen := make(map[string]bool)
-	var uniqueEndpoints []endpoint
-	for _, ep := range endpoints {
-		key := ep.Method + "|" + ep.Path + "|" + ep.FilePath
-		if !seen[key] {
-			seen[key] = true
-			uniqueEndpoints = append(uniqueEndpoints, ep)
-		}
-	}
-	endpoints = uniqueEndpoints
-
+	// Deduplicate and check for empty results
+	endpoints = deduplicateEndpoints(endpoints)
 	if len(endpoints) == 0 {
-		output := "No HTTP endpoints found.\n\n"
-		output += "**Tips:**\n"
-		output += "- Check if the codebase uses Go web frameworks (Gin, Echo, Chi, Fiber)\n"
-		output += "- Try a different `path_pattern` to narrow the search\n"
-		output += "- Use `cie_grep` with patterns like `.GET(` or `.POST(` for manual search\n"
-		return NewResult(output), nil
+		return NewResult(formatNoEndpointsFound()), nil
 	}
 
-	// Limit results and track if truncated
-	truncated := len(endpoints) > args.Limit
+	// Limit results
 	totalFound := len(endpoints)
+	truncated := totalFound > args.Limit
 	if truncated {
 		endpoints = endpoints[:args.Limit]
 	}
 
-	// Format output as a table
-	output := fmt.Sprintf("## HTTP Endpoints (%d found)\n\n", len(endpoints))
-	if args.PathPattern != "" {
-		output = fmt.Sprintf("## HTTP Endpoints in `%s` (%d found)\n\n", args.PathPattern, len(endpoints))
-	}
-	if args.PathFilter != "" {
-		output = fmt.Sprintf("## HTTP Endpoints matching `%s` (%d found)\n\n", args.PathFilter, len(endpoints))
-	}
-
-	output += "| Method | Path | Handler | File |\n"
-	output += "|--------|------|---------|------|\n"
-
-	for _, ep := range endpoints {
-		fileName := ExtractFileName(ep.FilePath)
-		output += fmt.Sprintf("| %s | `%s` | %s | %s:%s |\n",
-			ep.Method, ep.Path, ep.Handler, fileName, ep.Line)
-	}
-
-	// Summary section
-	output += "\n### Summary\n\n"
-
-	// Group by HTTP method
-	methodCounts := make(map[string]int)
-	for _, ep := range endpoints {
-		methodCounts[ep.Method]++
-	}
-	output += "**By Method:**\n"
-	methodOrder := []string{"GET", "POST", "PUT", "PATCH", "DELETE", "ANY"}
-	for _, m := range methodOrder {
-		if count, ok := methodCounts[m]; ok {
-			output += fmt.Sprintf("- %s: %d\n", m, count)
-		}
-	}
-	output += "\n"
-
-	// Group by path prefix for API structure
-	prefixCounts := make(map[string]int)
-	for _, ep := range endpoints {
-		prefix := extractPathPrefix(ep.Path)
-		prefixCounts[prefix]++
-	}
-
-	if len(prefixCounts) > 1 {
-		output += "**By API Path:**\n"
-		// Sort prefixes for consistent output
-		var prefixes []string
-		for prefix := range prefixCounts {
-			prefixes = append(prefixes, prefix)
-		}
-		sort.Strings(prefixes)
-		for _, prefix := range prefixes {
-			output += fmt.Sprintf("- `%s` (%d endpoints)\n", prefix, prefixCounts[prefix])
-		}
-		output += "\n"
-	}
-
-	// Group by file/module
-	fileCounts := make(map[string]int)
-	for _, ep := range endpoints {
-		fileName := ExtractFileName(ep.FilePath)
-		fileCounts[fileName]++
-	}
-	if len(fileCounts) > 1 {
-		output += "**By File:**\n"
-		var files []string
-		for f := range fileCounts {
-			files = append(files, f)
-		}
-		sort.Strings(files)
-		for _, f := range files {
-			output += fmt.Sprintf("- %s: %d\n", f, fileCounts[f])
-		}
-		output += "\n"
-	}
-
-	// Add truncation warning if we hit the limit
+	// Format output
+	output := formatEndpointHeader(args, len(endpoints))
+	output += formatEndpointTable(endpoints)
+	output += "\n" + formatEndpointSummary(endpoints)
 	if truncated {
 		output += fmt.Sprintf("⚠️ **Warning:** Results truncated. Found %d endpoints but showing only %d (limit). Use `limit=%d` or higher to see all results.\n", totalFound, args.Limit, totalFound)
 	}
 
 	return NewResult(output), nil
+}
+
+// formatNoEndpointsFound returns the message when no endpoints are found.
+func formatNoEndpointsFound() string {
+	return "No HTTP endpoints found.\n\n" +
+		"**Tips:**\n" +
+		"- Check if the codebase uses Go web frameworks (Gin, Echo, Chi, Fiber)\n" +
+		"- Try a different `path_pattern` to narrow the search\n" +
+		"- Use `cie_grep` with patterns like `.GET(` or `.POST(` for manual search\n"
+}
+
+// formatEndpointHeader generates the header for endpoint output.
+func formatEndpointHeader(args ListEndpointsArgs, count int) string {
+	if args.PathFilter != "" {
+		return fmt.Sprintf("## HTTP Endpoints matching `%s` (%d found)\n\n", args.PathFilter, count)
+	}
+	if args.PathPattern != "" {
+		return fmt.Sprintf("## HTTP Endpoints in `%s` (%d found)\n\n", args.PathPattern, count)
+	}
+	return fmt.Sprintf("## HTTP Endpoints (%d found)\n\n", count)
+}
+
+// formatEndpointTable generates the table of endpoints.
+func formatEndpointTable(endpoints []endpoint) string {
+	var sb strings.Builder
+	sb.WriteString("| Method | Path | Handler | File |\n")
+	sb.WriteString("|--------|------|---------|------|\n")
+	for _, ep := range endpoints {
+		fileName := ExtractFileName(ep.FilePath)
+		fmt.Fprintf(&sb, "| %s | `%s` | %s | %s:%s |\n", ep.Method, ep.Path, ep.Handler, fileName, ep.Line)
+	}
+	return sb.String()
 }
 
 // extractPathPrefix extracts the first 2 path segments for grouping (e.g., /v1/users -> /v1/users)
@@ -305,4 +186,152 @@ func extractPathPrefix(path string) string {
 		return "/" + parts[0]
 	}
 	return "/" + parts[0] + "/" + parts[1]
+}
+
+// endpoint holds parsed endpoint information.
+type endpoint struct {
+	Method   string
+	Path     string
+	Handler  string
+	FilePath string
+	Line     string
+}
+
+// buildEndpointQueryConditions builds query conditions for endpoint search.
+func buildEndpointQueryConditions(args ListEndpointsArgs) string {
+	httpMethodPattern := `([.](GET|POST|PUT|DELETE|PATCH|Get|Post|Put|Delete|Patch|Group|Any)[(]|Handle(Func)?[(])`
+	var conditions []string
+	conditions = append(conditions, fmt.Sprintf("regex_matches(code_text, %s)", QuoteCozoPattern(httpMethodPattern)))
+	if args.PathPattern != "" {
+		conditions = append(conditions, fmt.Sprintf("regex_matches(file_path, %s)", QuoteCozoPattern(args.PathPattern)))
+	}
+	conditions = append(conditions, `!regex_matches(file_path, ___"(_test[.]go|/tests?/|_test/|/test_)"___)`)
+	return strings.Join(conditions, ", ")
+}
+
+// parseEndpointsFromCode extracts endpoints from function code using HTTP patterns.
+func parseEndpointsFromCode(codeText, filePath, funcName, startLine string, args ListEndpointsArgs) []endpoint {
+	var endpoints []endpoint
+	for _, p := range httpMethodPatterns {
+		matches := p.pattern.FindAllStringSubmatch(codeText, -1)
+		for _, match := range matches {
+			ep := extractEndpointFromMatch(match, p.methodIndex, p.pathIndex, filePath, funcName, startLine)
+			if ep == nil {
+				continue
+			}
+			if !endpointMatchesFilters(ep, args) {
+				continue
+			}
+			endpoints = append(endpoints, *ep)
+		}
+	}
+	return endpoints
+}
+
+// extractEndpointFromMatch extracts endpoint info from a regex match.
+func extractEndpointFromMatch(match []string, methodIndex, pathIndex int, filePath, funcName, startLine string) *endpoint {
+	var httpMethod, httpPath string
+	if methodIndex > 0 && methodIndex < len(match) {
+		httpMethod = strings.ToUpper(match[methodIndex])
+	} else {
+		httpMethod = "ANY"
+	}
+	if pathIndex > 0 && pathIndex < len(match) {
+		httpPath = match[pathIndex]
+	}
+	if httpPath == "" {
+		return nil
+	}
+	return &endpoint{
+		Method:   httpMethod,
+		Path:     httpPath,
+		Handler:  funcName,
+		FilePath: filePath,
+		Line:     startLine,
+	}
+}
+
+// endpointMatchesFilters checks if an endpoint matches the given filters.
+func endpointMatchesFilters(ep *endpoint, args ListEndpointsArgs) bool {
+	if args.Method != "" && ep.Method != strings.ToUpper(args.Method) && ep.Method != "ANY" {
+		return false
+	}
+	if args.PathFilter != "" && !strings.Contains(strings.ToLower(ep.Path), strings.ToLower(args.PathFilter)) {
+		return false
+	}
+	return true
+}
+
+// deduplicateEndpoints removes duplicate endpoints.
+func deduplicateEndpoints(endpoints []endpoint) []endpoint {
+	seen := make(map[string]bool)
+	var unique []endpoint
+	for _, ep := range endpoints {
+		key := ep.Method + "|" + ep.Path + "|" + ep.FilePath
+		if !seen[key] {
+			seen[key] = true
+			unique = append(unique, ep)
+		}
+	}
+	return unique
+}
+
+// formatEndpointSummary generates the summary section of endpoint output.
+func formatEndpointSummary(endpoints []endpoint) string {
+	var sb strings.Builder
+	sb.WriteString("### Summary\n\n")
+
+	// Group by HTTP method
+	methodCounts := make(map[string]int)
+	for _, ep := range endpoints {
+		methodCounts[ep.Method]++
+	}
+	sb.WriteString("**By Method:**\n")
+	methodOrder := []string{"GET", "POST", "PUT", "PATCH", "DELETE", "ANY"}
+	for _, m := range methodOrder {
+		if count, ok := methodCounts[m]; ok {
+			fmt.Fprintf(&sb, "- %s: %d\n", m, count)
+		}
+	}
+	sb.WriteString("\n")
+
+	// Group by path prefix
+	prefixCounts := make(map[string]int)
+	for _, ep := range endpoints {
+		prefix := extractPathPrefix(ep.Path)
+		prefixCounts[prefix]++
+	}
+	if len(prefixCounts) > 1 {
+		sb.WriteString("**By API Path:**\n")
+		var prefixes []string
+		for prefix := range prefixCounts {
+			prefixes = append(prefixes, prefix)
+		}
+		sort.Strings(prefixes)
+		for _, prefix := range prefixes {
+			fmt.Fprintf(&sb, "- `%s` (%d endpoints)\n", prefix, prefixCounts[prefix])
+		}
+		sb.WriteString("\n")
+	}
+
+	// Group by file
+	fileCounts := make(map[string]int)
+	for _, ep := range endpoints {
+		fileName := ExtractFileName(ep.FilePath)
+		fileCounts[fileName]++
+	}
+	if len(fileCounts) > 1 {
+		sb.WriteString("**By File:**\n")
+		var files []string
+		for f := range fileCounts {
+			files = append(files, f)
+		}
+		sort.Strings(files)
+		for _, f := range files {
+			fmt.Fprintf(&sb, "- %s: %d\n", f, fileCounts[f])
+		}
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
 }

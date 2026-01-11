@@ -245,68 +245,75 @@ func (r *CallResolver) resolveCallsParallel(unresolvedCalls []UnresolvedCall) []
 
 // resolveCall attempts to resolve a single unresolved call.
 func (r *CallResolver) resolveCall(call UnresolvedCall) string {
-	// Case 1: Qualified call like "pkg.Foo()" or "response.RespondError()"
 	if strings.Contains(call.CalleeName, ".") {
-		parts := strings.SplitN(call.CalleeName, ".", 2)
-		pkgAlias := parts[0]
-		funcName := parts[1]
-
-		// Handle method calls on objects (e.g., "s.handler.Run()")
-		// We only care about the last component
-		if strings.Contains(funcName, ".") {
-			lastDot := strings.LastIndex(call.CalleeName, ".")
-			funcName = call.CalleeName[lastDot+1:]
-		}
-
-		// Skip if the function name doesn't start with uppercase (not exported)
-		if len(funcName) == 0 || funcName[0] < 'A' || funcName[0] > 'Z' {
-			return ""
-		}
-
-		// Look up the import path for this alias
-		imports, ok := r.fileImports[call.FilePath]
-		if !ok {
-			return ""
-		}
-
-		importPath, ok := imports[pkgAlias]
-		if !ok {
-			return ""
-		}
-
-		// Find matching package in our index
-		pkgPath := r.findPackageByImportPath(importPath)
-		if pkgPath == "" {
-			return ""
-		}
-
-		// Look up the function in that package
-		if funcs, ok := r.globalFunctions[pkgPath]; ok {
-			if funcID, ok := funcs[funcName]; ok {
-				return funcID
-			}
+		if id := r.resolveQualifiedCall(call); id != "" {
+			return id
 		}
 	}
+	return r.resolveDotImportCall(call)
+}
 
-	// Case 2: Dot import (function called without package prefix)
-	// Check if any dot imports contain this function
+// resolveQualifiedCall resolves calls like "pkg.Foo()" or "obj.Method()".
+func (r *CallResolver) resolveQualifiedCall(call UnresolvedCall) string {
+	parts := strings.SplitN(call.CalleeName, ".", 2)
+	funcName := extractLastComponent(call.CalleeName, parts[1])
+
+	if !isExportedName(funcName) {
+		return ""
+	}
+
 	imports, ok := r.fileImports[call.FilePath]
-	if ok {
-		for alias, importPath := range imports {
-			if alias == "." {
-				pkgPath := r.findPackageByImportPath(importPath)
-				if pkgPath == "" {
-					continue
-				}
-				if funcs, ok := r.globalFunctions[pkgPath]; ok {
-					if funcID, ok := funcs[call.CalleeName]; ok {
-						return funcID
-					}
-				}
+	if !ok {
+		return ""
+	}
+	importPath, ok := imports[parts[0]]
+	if !ok {
+		return ""
+	}
+	return r.lookupFunctionInPackage(importPath, funcName)
+}
+
+// resolveDotImportCall resolves calls from dot imports.
+func (r *CallResolver) resolveDotImportCall(call UnresolvedCall) string {
+	imports, ok := r.fileImports[call.FilePath]
+	if !ok {
+		return ""
+	}
+	for alias, importPath := range imports {
+		if alias == "." {
+			if id := r.lookupFunctionInPackage(importPath, call.CalleeName); id != "" {
+				return id
 			}
 		}
 	}
+	return ""
+}
 
+// extractLastComponent extracts the final function name from a chain like "obj.method.Func".
+func extractLastComponent(fullName, funcName string) string {
+	if strings.Contains(funcName, ".") {
+		lastDot := strings.LastIndex(fullName, ".")
+		return fullName[lastDot+1:]
+	}
+	return funcName
+}
+
+// isExportedName checks if a function name is exported (starts with uppercase).
+func isExportedName(name string) bool {
+	return len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z'
+}
+
+// lookupFunctionInPackage finds a function by import path and function name.
+func (r *CallResolver) lookupFunctionInPackage(importPath, funcName string) string {
+	pkgPath := r.findPackageByImportPath(importPath)
+	if pkgPath == "" {
+		return ""
+	}
+	if funcs, ok := r.globalFunctions[pkgPath]; ok {
+		if funcID, ok := funcs[funcName]; ok {
+			return funcID
+		}
+	}
 	return ""
 }
 

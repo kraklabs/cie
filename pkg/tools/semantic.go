@@ -66,9 +66,50 @@ var (
 
 // SemanticSearch performs semantic search using embeddings
 func SemanticSearch(ctx context.Context, client *CIEClient, args SemanticSearchArgs) (*ToolResult, error) {
+	args = normalizeSemanticArgs(args)
 	if args.Query == "" {
 		return NewError("Error: 'query' is required"), nil
 	}
+
+	// Generate embedding
+	embedding, err := generateEmbedding(ctx, args.EmbeddingURL, args.EmbeddingModel, args.Query)
+	if err != nil {
+		return semanticSearchFallback(ctx, client, args.Query, args.Limit, args.Role, args.PathPattern, args.ExcludePaths, fmt.Sprintf("embedding generation failed: %v", err))
+	}
+
+	// Execute HNSW query
+	result, err := executeHNSWQuery(ctx, client, embedding, args)
+	if err != nil {
+		return semanticSearchFallback(ctx, client, args.Query, args.Limit, args.Role, args.PathPattern, args.ExcludePaths, fmt.Sprintf("HNSW query failed: %v", err))
+	}
+	if len(result.Rows) == 0 {
+		return semanticSearchFallback(ctx, client, args.Query, args.Limit, args.Role, args.PathPattern, args.ExcludePaths, "no vectors found in HNSW index (embeddings may not be generated)")
+	}
+
+	// Post-filter results
+	result.Rows = postFilterByPath(result.Rows, args.PathPattern, args.Role, args.Query, args.ExcludePaths, true)
+	if len(result.Rows) == 0 {
+		reason := "no results matching filters in semantic search results"
+		if args.PathPattern != "" {
+			reason = fmt.Sprintf("no results matching path '%s' in semantic search results", args.PathPattern)
+		}
+		return semanticSearchFallback(ctx, client, args.Query, args.Limit, args.Role, args.PathPattern, args.ExcludePaths, reason)
+	}
+
+	// Apply min_similarity filter
+	result.Rows = filterByMinSimilarity(result.Rows, args.MinSimilarity)
+	if len(result.Rows) == 0 {
+		return NewResult(fmt.Sprintf("No results with similarity >= %.0f%% for '%s'", args.MinSimilarity*100, args.Query)), nil
+	}
+
+	// Limit and format results
+	if len(result.Rows) > args.Limit {
+		result.Rows = result.Rows[:args.Limit]
+	}
+	return NewResult(formatSemanticResults(result.Rows, args)), nil
+}
+
+func normalizeSemanticArgs(args SemanticSearchArgs) SemanticSearchArgs {
 	if args.Limit <= 0 {
 		args.Limit = 10
 	}
@@ -78,21 +119,12 @@ func SemanticSearch(ctx context.Context, client *CIEClient, args SemanticSearchA
 	if args.Limit > 50 {
 		args.Limit = 50
 	}
+	return args
+}
 
-	// 1. Generate embedding for the query using Ollama
-	embedding, err := generateEmbedding(ctx, args.EmbeddingURL, args.EmbeddingModel, args.Query)
-	if err != nil {
-		// Fallback to text search if embedding fails - be transparent about it
-		return semanticSearchFallback(ctx, client, args.Query, args.Limit, args.Role, args.PathPattern, args.ExcludePaths, fmt.Sprintf("embedding generation failed: %v", err))
-	}
-
-	// 2. Build HNSW query parameters (no in-query filters, we post-filter in Go)
+func executeHNSWQuery(ctx context.Context, client *CIEClient, embedding []float64, args SemanticSearchArgs) (*QueryResult, error) {
 	vecLiteral := formatEmbeddingForCozoDB(embedding)
 	queryK, ef := buildHNSWParams(args.Limit, args.Role, args.PathPattern)
-
-	// 3. Execute HNSW query (retrieve many candidates, filter later)
-	// Schema v3: HNSW index is on cie_function_embedding, join with cie_function for metadata
-	// Also join with cie_function_code to get code snippets for preview
 	script := fmt.Sprintf(`?[name, file_path, signature, start_line, distance, code_text] :=
 		~cie_function_embedding:embedding_idx { function_id | query: q, k: %d, ef: %d, bind_distance: distance },
 		q = %s,
@@ -100,105 +132,81 @@ func SemanticSearch(ctx context.Context, client *CIEClient, args SemanticSearchA
 		*cie_function_code { function_id: function_id, code_text }
 		:order distance
 		:limit %d`, queryK, ef, vecLiteral, queryK)
+	return client.Query(ctx, script)
+}
 
-	result, err := client.Query(ctx, script)
-	if err != nil {
-		return semanticSearchFallback(ctx, client, args.Query, args.Limit, args.Role, args.PathPattern, args.ExcludePaths, fmt.Sprintf("HNSW query failed: %v", err))
+func filterByMinSimilarity(rows [][]any, minSimilarity float64) [][]any {
+	if minSimilarity <= 0 {
+		return rows
 	}
-
-	if len(result.Rows) == 0 {
-		return semanticSearchFallback(ctx, client, args.Query, args.Limit, args.Role, args.PathPattern, args.ExcludePaths, "no vectors found in HNSW index (embeddings may not be generated)")
-	}
-
-	// 4. Post-filter by path pattern, role, noise, and anonymous functions
-	// ExcludeAnonymous defaults to true (better UX) - only set to false to see $arrow_X, $anon_X
-	excludeAnonymous := true
-	if args.ExcludeAnonymous { // explicitly set
-		excludeAnonymous = args.ExcludeAnonymous
-	}
-	result.Rows = postFilterByPath(result.Rows, args.PathPattern, args.Role, args.Query, args.ExcludePaths, excludeAnonymous)
-	if len(result.Rows) == 0 {
-		reason := "no results matching filters in semantic search results"
-		if args.PathPattern != "" {
-			reason = fmt.Sprintf("no results matching path '%s' in semantic search results", args.PathPattern)
+	filtered := make([][]any, 0, len(rows))
+	for _, row := range rows {
+		if len(row) < 5 {
+			continue
 		}
-		return semanticSearchFallback(ctx, client, args.Query, args.Limit, args.Role, args.PathPattern, args.ExcludePaths, reason)
-	}
-
-	// 5. Apply min_similarity filter if specified
-	if args.MinSimilarity > 0 {
-		filtered := make([][]any, 0, len(result.Rows))
-		for _, row := range result.Rows {
-			if len(row) < 5 {
-				continue
-			}
-			if d, ok := row[4].(float64); ok {
-				similarity := 1.0 - d
-				if similarity >= args.MinSimilarity {
-					filtered = append(filtered, row)
-				}
+		if d, ok := row[4].(float64); ok {
+			if 1.0-d >= minSimilarity {
+				filtered = append(filtered, row)
 			}
 		}
-		result.Rows = filtered
-		if len(result.Rows) == 0 {
-			return NewResult(fmt.Sprintf("No results with similarity >= %.0f%% for '%s'", args.MinSimilarity*100, args.Query)), nil
-		}
 	}
+	return filtered
+}
 
-	// Limit results
-	if len(result.Rows) > args.Limit {
-		result.Rows = result.Rows[:args.Limit]
-	}
-
-	// Format results with similarity scores and confidence indicators
-	output := fmt.Sprintf("🔍 **Semantic search** for '%s' (using embeddings):\n\n", args.Query)
+func formatSemanticResults(rows [][]any, args SemanticSearchArgs) string {
+	var sb strings.Builder
 	if args.PathPattern != "" {
-		output = fmt.Sprintf("🔍 **Semantic search** for '%s' in '%s' (using embeddings):\n\n", args.Query, args.PathPattern)
+		fmt.Fprintf(&sb, "🔍 **Semantic search** for '%s' in '%s' (using embeddings):\n\n", args.Query, args.PathPattern)
+	} else {
+		fmt.Fprintf(&sb, "🔍 **Semantic search** for '%s' (using embeddings):\n\n", args.Query)
 	}
-	for i, row := range result.Rows {
-		name := AnyToString(row[0])
-		filePath := AnyToString(row[1])
-		signature := AnyToString(row[2])
-		startLine := AnyToString(row[3])
-		distance := row[4]
 
-		// Convert distance to similarity (1 - cosine_distance)
-		similarity := 1.0
-		if d, ok := distance.(float64); ok {
-			similarity = 1.0 - d
-		}
+	for i, row := range rows {
+		formatSemanticResultRow(&sb, i+1, row)
+	}
+	return sb.String()
+}
 
-		// Add confidence indicator based on similarity
-		confidenceIcon := "🟢" // High: >= 75%
-		if similarity < 0.75 {
-			confidenceIcon = "🟡" // Medium: 50-75%
-		}
-		if similarity < 0.50 {
-			confidenceIcon = "🔴" // Low: < 50%
-		}
+func formatSemanticResultRow(sb *strings.Builder, num int, row []any) {
+	name := AnyToString(row[0])
+	filePath := AnyToString(row[1])
+	signature := AnyToString(row[2])
+	startLine := AnyToString(row[3])
 
-		output += fmt.Sprintf("%d. %s **%s** (%.1f%% match)\n", i+1, confidenceIcon, name, similarity*100)
-		output += fmt.Sprintf("   📁 %s:%s\n", filePath, startLine)
-		if len(signature) < 100 && signature != "" {
-			output += fmt.Sprintf("   📝 `%s`\n", signature)
-		}
+	similarity := 1.0
+	if d, ok := row[4].(float64); ok {
+		similarity = 1.0 - d
+	}
 
-		// Add code snippet preview (first 3 lines)
-		if len(row) > 5 {
-			codeText := AnyToString(row[5])
-			snippet := extractCodeSnippet(codeText, 3)
-			if snippet != "" {
-				output += "   ```\n"
-				for _, line := range strings.Split(snippet, "\n") {
-					output += "   " + line + "\n"
-				}
-				output += "   ```\n"
+	confidenceIcon := getConfidenceIcon(similarity)
+	fmt.Fprintf(sb, "%d. %s **%s** (%.1f%% match)\n", num, confidenceIcon, name, similarity*100)
+	fmt.Fprintf(sb, "   📁 %s:%s\n", filePath, startLine)
+	if len(signature) < 100 && signature != "" {
+		fmt.Fprintf(sb, "   📝 `%s`\n", signature)
+	}
+
+	if len(row) > 5 {
+		codeText := AnyToString(row[5])
+		snippet := extractCodeSnippet(codeText, 3)
+		if snippet != "" {
+			sb.WriteString("   ```\n")
+			for _, line := range strings.Split(snippet, "\n") {
+				sb.WriteString("   " + line + "\n")
 			}
+			sb.WriteString("   ```\n")
 		}
-		output += "\n"
 	}
+	sb.WriteString("\n")
+}
 
-	return NewResult(output), nil
+func getConfidenceIcon(similarity float64) string {
+	if similarity >= 0.75 {
+		return "🟢"
+	}
+	if similarity >= 0.50 {
+		return "🟡"
+	}
+	return "🔴"
 }
 
 // semanticSearchFallback uses text search when semantic search is unavailable
@@ -355,7 +363,7 @@ func generateEmbedding(ctx context.Context, embeddingURL, embeddingModel, text s
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)

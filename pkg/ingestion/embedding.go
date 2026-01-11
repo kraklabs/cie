@@ -69,8 +69,8 @@ func (m *MockEmbeddingProvider) Embed(ctx context.Context, text string) ([]float
 	embedding := make([]float32, m.dimension)
 	for i := 0; i < m.dimension; i++ {
 		// Use hash to generate pseudo-random values
-		val := float32((hash+uint64(i)*7919)%10000) / 10000.0
-		embedding[i] = val*2.0 - 1.0 // Map to [-1, 1]
+		val := float32((hash+uint64(i)*7919)%10000) / 10000.0 //nolint:gosec // G115: i is bounded by dimension (small constant)
+		embedding[i] = val*2.0 - 1.0                          // Map to [-1, 1]
 	}
 
 	// Normalize to unit vector
@@ -214,100 +214,89 @@ func (eg *EmbeddingGenerator) embedFunctionsSequential(ctx context.Context, func
 	}, nil
 }
 
+// embeddingJobResult holds the result of a single embedding job.
+type embeddingJobResult struct {
+	index     int
+	function  FunctionEntity
+	hasErr    bool
+	truncated bool
+}
+
 // embedFunctionsParallel processes embeddings in parallel using worker pool.
 func (eg *EmbeddingGenerator) embedFunctionsParallel(ctx context.Context, functions []FunctionEntity) (*EmbedFunctionsResult, error) {
 	results := make([]FunctionEntity, len(functions))
-	errorCount := int32(0) // Use atomic for thread safety
-	truncatedCount := int32(0)
+	var errorCount, truncatedCount int32
 
-	// Create channels for work distribution
 	jobs := make(chan int, len(functions))
-	resultsChan := make(chan struct {
-		index     int
-		function  FunctionEntity
-		err       bool
-		truncated bool
-	}, len(functions))
+	resultsChan := make(chan embeddingJobResult, len(functions))
 
-	// Start workers
 	var wg sync.WaitGroup
 	for w := 0; w < eg.workers; w++ {
 		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := range jobs {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
-
-				fn := functions[i]
-				embedding, wasTruncated, err := eg.embedFunction(ctx, fn)
-				if err != nil {
-					// Atomic increment
-					for {
-						old := errorCount
-						if atomic.CompareAndSwapInt32(&errorCount, old, old+1) {
-							break
-						}
-					}
-				}
-				if wasTruncated {
-					for {
-						old := truncatedCount
-						if atomic.CompareAndSwapInt32(&truncatedCount, old, old+1) {
-							break
-						}
-					}
-				}
-
-				fn.Embedding = embedding
-				resultsChan <- struct {
-					index     int
-					function  FunctionEntity
-					err       bool
-					truncated bool
-				}{i, fn, err != nil, wasTruncated}
-			}
-		}()
+		go eg.embeddingWorker(ctx, &wg, functions, jobs, resultsChan, &errorCount, &truncatedCount)
 	}
 
-	// Send jobs
 	for i := range functions {
 		jobs <- i
 	}
 	close(jobs)
 
-	// Wait for workers and collect results
 	go func() {
 		wg.Wait()
 		close(resultsChan)
 	}()
 
-	// Collect results
 	for result := range resultsChan {
 		results[result.index] = result.function
 	}
 
-	// Log summary if there were errors or truncations (aggregated, not individual)
-	errCount := int(errorCount)
-	truncCount := int(truncatedCount)
-	if errCount > 0 || truncCount > 0 {
-		eg.logger.Info("embedding.summary",
-			"total_functions", len(functions),
-			"errors", errCount,
-			"truncated", truncCount,
-			"workers", eg.workers,
-			"error_rate_pct", float64(errCount)/float64(len(functions))*100.0,
-		)
-	}
+	eg.logEmbeddingSummary(len(functions), int(errorCount), int(truncatedCount))
 
 	return &EmbedFunctionsResult{
 		Functions:      results,
-		ErrorCount:     errCount,
-		TruncatedCount: truncCount,
+		ErrorCount:     int(errorCount),
+		TruncatedCount: int(truncatedCount),
 	}, nil
+}
+
+// embeddingWorker processes embedding jobs from the jobs channel.
+func (eg *EmbeddingGenerator) embeddingWorker(
+	ctx context.Context,
+	wg *sync.WaitGroup,
+	functions []FunctionEntity,
+	jobs <-chan int,
+	results chan<- embeddingJobResult,
+	errorCount, truncatedCount *int32,
+) {
+	defer wg.Done()
+	for i := range jobs {
+		if ctx.Err() != nil {
+			return
+		}
+		fn := functions[i]
+		embedding, wasTruncated, err := eg.embedFunction(ctx, fn)
+		if err != nil {
+			atomic.AddInt32(errorCount, 1)
+		}
+		if wasTruncated {
+			atomic.AddInt32(truncatedCount, 1)
+		}
+		fn.Embedding = embedding
+		results <- embeddingJobResult{i, fn, err != nil, wasTruncated}
+	}
+}
+
+// logEmbeddingSummary logs embedding summary if there were errors or truncations.
+func (eg *EmbeddingGenerator) logEmbeddingSummary(total, errCount, truncCount int) {
+	if errCount > 0 || truncCount > 0 {
+		eg.logger.Info("embedding.summary",
+			"total_functions", total,
+			"errors", errCount,
+			"truncated", truncCount,
+			"workers", eg.workers,
+			"error_rate_pct", float64(errCount)/float64(total)*100.0,
+		)
+	}
 }
 
 // EmbedTypesResult contains the results of embedding generation for types.
@@ -866,14 +855,6 @@ type OllamaErrorResponse struct {
 // asymmetric search prefixes (search_document/search_query).
 func isNomicModel(model string) bool {
 	return strings.Contains(strings.ToLower(model), "nomic")
-}
-
-// isQodoModel checks if the model is a Qodo embedding model.
-// Qodo-Embed models are trained on natural language <-> code pairs directly,
-// requiring no special prefixes for documents or queries.
-// See: https://huggingface.co/Qodo/Qodo-Embed-1-1.5B
-func isQodoModel(model string) bool {
-	return strings.Contains(strings.ToLower(model), "qodo")
 }
 
 // NewOllamaEmbeddingProvider creates a new Ollama embedding provider.

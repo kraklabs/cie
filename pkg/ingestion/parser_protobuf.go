@@ -40,99 +40,111 @@ import (
 //	"rpc MethodName(RequestType) returns (ResponseType)"
 //
 // This is a shared implementation used by both Parser and TreeSitterParser.
+// protoParseState holds state during protobuf parsing.
+type protoParseState struct {
+	filePath     string
+	truncateFunc func(string) string
+	lines        []string
+	functions    []FunctionEntity
+	// Service tracking
+	currentService   string
+	serviceStartLine int
+	serviceLines     []string
+	braceCount       int
+}
+
 func parseProtobufContent(content string, filePath string, truncateFunc func(string) string) ([]FunctionEntity, []CallsEdge) {
-	var functions []FunctionEntity
-
-	lines := strings.Split(content, "\n")
-	var currentService string
-	var serviceStartLine int
-	var serviceLines []string
-	braceCount := 0
-
-	for i, line := range lines {
-		lineNum := i + 1
-		trimmed := strings.TrimSpace(line)
-
-		// Skip comments
-		if strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "/*") {
-			continue
-		}
-
-		// Detect service: service ServiceName {
-		if strings.HasPrefix(trimmed, "service ") && strings.Contains(trimmed, "{") {
-			parts := strings.Fields(trimmed)
-			if len(parts) >= 2 {
-				currentService = strings.TrimSuffix(parts[1], "{")
-				serviceStartLine = lineNum
-				serviceLines = []string{line}
-				braceCount = strings.Count(trimmed, "{") - strings.Count(trimmed, "}")
-
-				if braceCount == 0 {
-					fn := createProtobufEntity(filePath, currentService, "service "+currentService, serviceStartLine, lineNum, strings.Join(serviceLines, "\n"), truncateFunc)
-					functions = append(functions, fn)
-					currentService = ""
-				}
-			}
-			continue
-		}
-
-		// Track braces in service block
-		if currentService != "" {
-			serviceLines = append(serviceLines, line)
-			braceCount += strings.Count(trimmed, "{") - strings.Count(trimmed, "}")
-
-			// Detect RPC
-			if strings.HasPrefix(trimmed, "rpc ") {
-				rpcName, rpcSignature := extractRPCSignature(trimmed)
-				if rpcName != "" {
-					fullName := currentService + "." + rpcName
-					fn := createProtobufEntity(filePath, fullName, rpcSignature, lineNum, lineNum, trimmed, truncateFunc)
-					functions = append(functions, fn)
-				}
-			}
-
-			// End of service
-			if braceCount == 0 {
-				fn := createProtobufEntity(filePath, currentService, "service "+currentService, serviceStartLine, lineNum, strings.Join(serviceLines, "\n"), truncateFunc)
-				functions = append(functions, fn)
-				currentService = ""
-				serviceLines = nil
-			}
-			continue
-		}
-
-		// Detect message
-		if strings.HasPrefix(trimmed, "message ") && strings.Contains(trimmed, "{") {
-			parts := strings.Fields(trimmed)
-			if len(parts) >= 2 {
-				msgName := strings.TrimSuffix(parts[1], "{")
-				endLine := findProtobufBlockEnd(lines, i)
-
-				codeLines := lines[i:endLine]
-				codeText := strings.Join(codeLines, "\n")
-
-				fn := createProtobufEntity(filePath, msgName, "message "+msgName, lineNum, endLine, codeText, truncateFunc)
-				functions = append(functions, fn)
-			}
-		}
-
-		// Detect enum
-		if strings.HasPrefix(trimmed, "enum ") && strings.Contains(trimmed, "{") {
-			parts := strings.Fields(trimmed)
-			if len(parts) >= 2 {
-				enumName := strings.TrimSuffix(parts[1], "{")
-				endLine := findProtobufBlockEnd(lines, i)
-
-				codeLines := lines[i:endLine]
-				codeText := strings.Join(codeLines, "\n")
-
-				fn := createProtobufEntity(filePath, enumName, "enum "+enumName, lineNum, endLine, codeText, truncateFunc)
-				functions = append(functions, fn)
-			}
-		}
+	state := &protoParseState{
+		filePath:     filePath,
+		truncateFunc: truncateFunc,
+		lines:        strings.Split(content, "\n"),
 	}
 
-	return functions, nil
+	for i, line := range state.lines {
+		state.processLine(i, line)
+	}
+
+	return state.functions, nil
+}
+
+func (s *protoParseState) processLine(idx int, line string) {
+	lineNum := idx + 1
+	trimmed := strings.TrimSpace(line)
+
+	if strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "/*") {
+		return
+	}
+
+	if s.currentService != "" {
+		s.processServiceLine(lineNum, line, trimmed)
+		return
+	}
+
+	s.processTopLevel(idx, lineNum, line, trimmed)
+}
+
+func (s *protoParseState) processServiceLine(lineNum int, line, trimmed string) {
+	s.serviceLines = append(s.serviceLines, line)
+	s.braceCount += strings.Count(trimmed, "{") - strings.Count(trimmed, "}")
+
+	if strings.HasPrefix(trimmed, "rpc ") {
+		s.handleRPC(lineNum, trimmed)
+	}
+
+	if s.braceCount == 0 {
+		s.endService(lineNum)
+	}
+}
+
+func (s *protoParseState) handleRPC(lineNum int, trimmed string) {
+	rpcName, rpcSignature := extractRPCSignature(trimmed)
+	if rpcName != "" {
+		fn := createProtobufEntity(s.filePath, s.currentService+"."+rpcName, rpcSignature, lineNum, lineNum, trimmed, s.truncateFunc)
+		s.functions = append(s.functions, fn)
+	}
+}
+
+func (s *protoParseState) endService(lineNum int) {
+	fn := createProtobufEntity(s.filePath, s.currentService, "service "+s.currentService, s.serviceStartLine, lineNum, strings.Join(s.serviceLines, "\n"), s.truncateFunc)
+	s.functions = append(s.functions, fn)
+	s.currentService = ""
+	s.serviceLines = nil
+}
+
+func (s *protoParseState) processTopLevel(idx, lineNum int, line, trimmed string) {
+	if strings.HasPrefix(trimmed, "service ") && strings.Contains(trimmed, "{") {
+		s.startService(lineNum, line, trimmed)
+	} else if strings.HasPrefix(trimmed, "message ") && strings.Contains(trimmed, "{") {
+		s.handleBlock(idx, lineNum, trimmed, "message")
+	} else if strings.HasPrefix(trimmed, "enum ") && strings.Contains(trimmed, "{") {
+		s.handleBlock(idx, lineNum, trimmed, "enum")
+	}
+}
+
+func (s *protoParseState) startService(lineNum int, line, trimmed string) {
+	parts := strings.Fields(trimmed)
+	if len(parts) < 2 {
+		return
+	}
+	s.currentService = strings.TrimSuffix(parts[1], "{")
+	s.serviceStartLine = lineNum
+	s.serviceLines = []string{line}
+	s.braceCount = strings.Count(trimmed, "{") - strings.Count(trimmed, "}")
+	if s.braceCount == 0 {
+		s.endService(lineNum)
+	}
+}
+
+func (s *protoParseState) handleBlock(idx, lineNum int, trimmed, prefix string) {
+	parts := strings.Fields(trimmed)
+	if len(parts) < 2 {
+		return
+	}
+	name := strings.TrimSuffix(parts[1], "{")
+	endLine := findProtobufBlockEnd(s.lines, idx)
+	codeText := strings.Join(s.lines[idx:endLine], "\n")
+	fn := createProtobufEntity(s.filePath, name, prefix+" "+name, lineNum, endLine, codeText, s.truncateFunc)
+	s.functions = append(s.functions, fn)
 }
 
 // parseProtobufSimplified extracts services, RPCs, and messages from .proto files.

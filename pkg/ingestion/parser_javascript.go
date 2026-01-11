@@ -320,7 +320,7 @@ func (p *TreeSitterParser) extractJSAnonymousArrow(node *sitter.Node, content []
 func (p *TreeSitterParser) extractJSCalls(root *sitter.Node, content []byte, caller FunctionEntity, funcNameToID map[string]string) []CallsEdge {
 	var calls []CallsEdge
 
-	fnNode := findNodeAtPosition(root, uint32(caller.StartLine-1), uint32(caller.StartCol-1))
+	fnNode := findNodeAtPosition(root, uint32(caller.StartLine-1), uint32(caller.StartCol-1)) //nolint:gosec // G115: line/col from parsed source are bounded
 	if fnNode == nil {
 		return calls
 	}
@@ -612,100 +612,135 @@ func (p *Parser) extractJSCallsSimplified(functions []FunctionEntity) []CallsEdg
 	return calls
 }
 
+// jsParseState tracks state during JavaScript code parsing.
+type jsParseState struct {
+	code          string
+	pos           int
+	inString      bool
+	stringChar    byte
+	inTemplate    bool
+	inComment     bool
+	inLineComment bool
+}
+
 // findJSCalls extracts potential function call names from JavaScript code.
 func (p *Parser) findJSCalls(code string) []string {
 	var calls []string
-	inString := false
-	stringChar := byte(0)
-	inTemplate := false
-	inComment := false
-	inLineComment := false
+	state := &jsParseState{code: code}
 
-	i := 0
-	for i < len(code) {
-		// Handle comments
-		if !inString && !inTemplate && i+1 < len(code) {
-			if code[i] == '/' && code[i+1] == '/' {
-				inLineComment = true
-				i += 2
-				continue
-			}
-			if code[i] == '/' && code[i+1] == '*' {
-				inComment = true
-				i += 2
-				continue
-			}
-		}
-		if inLineComment && code[i] == '\n' {
-			inLineComment = false
-			i++
+	for state.pos < len(code) {
+		if state.handleJSComment() {
 			continue
 		}
-		if inComment && i+1 < len(code) && code[i] == '*' && code[i+1] == '/' {
-			inComment = false
-			i += 2
+		if state.inComment || state.inLineComment {
+			state.pos++
 			continue
 		}
-		if inComment || inLineComment {
-			i++
+		if state.handleJSTemplate() {
 			continue
 		}
+		if state.inTemplate {
+			state.pos++
+			continue
+		}
+		if state.handleJSString() {
+			continue
+		}
+		if state.inString {
+			state.pos++
+			continue
+		}
+		if call := state.extractJSCall(); call != "" {
+			calls = append(calls, call)
+			continue
+		}
+		state.pos++
+	}
+	return calls
+}
 
-		// Handle template literals
-		if !inString && code[i] == '`' {
-			inTemplate = !inTemplate
-			i++
-			continue
+// handleJSComment handles JavaScript comments.
+func (s *jsParseState) handleJSComment() bool {
+	if s.inString || s.inTemplate {
+		return false
+	}
+	// Check for comment start
+	if s.pos+1 < len(s.code) {
+		if s.code[s.pos] == '/' && s.code[s.pos+1] == '/' {
+			s.inLineComment = true
+			s.pos += 2
+			return true
 		}
-		if inTemplate {
-			i++
-			continue
+		if s.code[s.pos] == '/' && s.code[s.pos+1] == '*' {
+			s.inComment = true
+			s.pos += 2
+			return true
 		}
+	}
+	// Check for comment end
+	if s.inLineComment && s.pos < len(s.code) && s.code[s.pos] == '\n' {
+		s.inLineComment = false
+		s.pos++
+		return true
+	}
+	if s.inComment && s.pos+1 < len(s.code) && s.code[s.pos] == '*' && s.code[s.pos+1] == '/' {
+		s.inComment = false
+		s.pos += 2
+		return true
+	}
+	return false
+}
 
-		// Handle strings
-		if !inString && (code[i] == '"' || code[i] == '\'') {
-			stringChar = code[i]
-			inString = true
-			i++
-			continue
-		}
-		if inString && code[i] == stringChar && (i == 0 || code[i-1] != '\\') {
-			inString = false
-			i++
-			continue
-		}
-		if inString {
-			i++
-			continue
-		}
+// handleJSTemplate handles template literal boundaries.
+func (s *jsParseState) handleJSTemplate() bool {
+	if s.inString || s.pos >= len(s.code) || s.code[s.pos] != '`' {
+		return false
+	}
+	s.inTemplate = !s.inTemplate
+	s.pos++
+	return true
+}
 
-		// Look for identifier followed by (
-		if isJSIdentStart(code[i]) {
-			start := i
-			for i < len(code) && isJSIdentChar(code[i]) {
-				i++
-			}
-			name := code[start:i]
+// handleJSString handles string start/end.
+func (s *jsParseState) handleJSString() bool {
+	if s.pos >= len(s.code) {
+		return false
+	}
+	c := s.code[s.pos]
+	if !s.inString && (c == '"' || c == '\'') {
+		s.stringChar = c
+		s.inString = true
+		s.pos++
+		return true
+	}
+	if s.inString && c == s.stringChar && (s.pos == 0 || s.code[s.pos-1] != '\\') {
+		s.inString = false
+		s.pos++
+		return true
+	}
+	return false
+}
 
-			// Skip whitespace
-			for i < len(code) && (code[i] == ' ' || code[i] == '\t' || code[i] == '\n') {
-				i++
-			}
+// extractJSCall extracts a function call if present.
+func (s *jsParseState) extractJSCall() string {
+	if s.pos >= len(s.code) || !isJSIdentStart(s.code[s.pos]) {
+		return ""
+	}
+	start := s.pos
+	for s.pos < len(s.code) && isJSIdentChar(s.code[s.pos]) {
+		s.pos++
+	}
+	name := s.code[start:s.pos]
 
-			// Check for ( - this is a function call
-			if i < len(code) && code[i] == '(' {
-				// Skip keywords
-				if !isJSKeyword(name) {
-					calls = append(calls, name)
-				}
-			}
-			continue
-		}
-
-		i++
+	// Skip whitespace
+	for s.pos < len(s.code) && (s.code[s.pos] == ' ' || s.code[s.pos] == '\t' || s.code[s.pos] == '\n') {
+		s.pos++
 	}
 
-	return calls
+	if s.pos < len(s.code) && s.code[s.pos] == '(' && !isJSKeyword(name) {
+		return name
+	}
+	return ""
 }
 
 // isJSIdentStart checks if c can start a JavaScript identifier.

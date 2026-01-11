@@ -84,7 +84,7 @@ func (c *CIEClient) Query(ctx context.Context, script string) (*QueryResult, err
 	if err != nil {
 		return nil, fmt.Errorf("query failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
@@ -116,7 +116,7 @@ func (c *CIEClient) QueryRaw(ctx context.Context, script string) (map[string]any
 	if err != nil {
 		return nil, fmt.Errorf("query failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {

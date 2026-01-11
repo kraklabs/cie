@@ -244,10 +244,7 @@ func CreateFileManifestEntryWithCalls(file FileEntity, functions []FunctionEntit
 		// Check if caller belongs to this file
 		for _, fn := range functions {
 			if call.CallerID == fn.ID {
-				entry.CallsEdges = append(entry.CallsEdges, CallEdgeManifestEntry{
-					CallerID: call.CallerID,
-					CalleeID: call.CalleeID,
-				})
+				entry.CallsEdges = append(entry.CallsEdges, CallEdgeManifestEntry(call))
 				break
 			}
 		}
@@ -266,15 +263,15 @@ func computeEmbeddingHash(embedding []float32) string {
 	// Create a simple hash based on first/last values and dimension
 	// This is fast and sufficient for detecting changes
 	h := sha256.New()
-	h.Write([]byte(fmt.Sprintf("dim:%d:", len(embedding))))
+	_, _ = fmt.Fprintf(h, "dim:%d:", len(embedding))
 
 	// Sample a few values for the hash (first, middle, last)
-	h.Write([]byte(fmt.Sprintf("%.6f:", embedding[0])))
+	_, _ = fmt.Fprintf(h, "%.6f:", embedding[0])
 	if len(embedding) > 2 {
 		mid := len(embedding) / 2
-		h.Write([]byte(fmt.Sprintf("%.6f:", embedding[mid])))
+		_, _ = fmt.Fprintf(h, "%.6f:", embedding[mid])
 	}
-	h.Write([]byte(fmt.Sprintf("%.6f", embedding[len(embedding)-1])))
+	_, _ = fmt.Fprintf(h, "%.6f", embedding[len(embedding)-1])
 
 	return hex.EncodeToString(h.Sum(nil)[:8]) // First 8 bytes = 16 hex chars
 }
@@ -376,16 +373,12 @@ func ComputeFileDiff(path string, oldEntry, newEntry *FileManifestEntry) *FileDi
 	case oldEntry == nil && newEntry != nil:
 		diff.ChangeType = FileAdded
 		// All functions are new
-		for _, fn := range newEntry.Functions {
-			diff.AddedFunctions = append(diff.AddedFunctions, fn)
-		}
+		diff.AddedFunctions = append(diff.AddedFunctions, newEntry.Functions...)
 
 	case oldEntry != nil && newEntry == nil:
 		diff.ChangeType = FileDeleted
 		// All functions are removed
-		for _, fn := range oldEntry.Functions {
-			diff.RemovedFunctions = append(diff.RemovedFunctions, fn)
-		}
+		diff.RemovedFunctions = append(diff.RemovedFunctions, oldEntry.Functions...)
 
 	case oldEntry != nil && newEntry != nil:
 		diff.ChangeType = FileModified
@@ -460,7 +453,7 @@ func NewManifestManager(basePath string) *ManifestManager {
 func (mm *ManifestManager) LoadManifest(projectID string) (*ProjectManifest, error) {
 	path := mm.getManifestPath(projectID)
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path from manifest manager
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil // First run - no manifest yet
@@ -496,7 +489,7 @@ func (mm *ManifestManager) SaveManifest(manifest *ProjectManifest) error {
 
 	// Ensure directory exists
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0750); err != nil {
 		return fmt.Errorf("create manifest dir: %w", err)
 	}
 
@@ -515,7 +508,7 @@ func (mm *ManifestManager) SaveManifest(manifest *ProjectManifest) error {
 
 	// Write atomically (temp file + rename)
 	tmpPath := path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
 		return fmt.Errorf("write manifest temp: %w", err)
 	}
 

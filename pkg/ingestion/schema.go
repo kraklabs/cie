@@ -246,6 +246,6 @@ func GenerateTypeID(filePath, name string, startLine, endLine int) string {
 	h.Write([]byte("|"))
 	h.Write([]byte(name))
 	h.Write([]byte("|"))
-	h.Write([]byte(fmt.Sprintf("%d-%d", startLine, endLine)))
+	_, _ = fmt.Fprintf(h, "%d-%d", startLine, endLine)
 	return "typ:" + hex.EncodeToString(h.Sum(nil))[:16]
 }

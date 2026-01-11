@@ -33,26 +33,7 @@ import (
 const (
 	mcpVersion    = "1.4.0" // Added multi-pattern grep, verify_absence tool, improved endpoints summary
 	mcpServerName = "cie"
-
-	// semanticSearchPathFilterK is the number of HNSW candidates to retrieve
-	// when path_pattern filtering is needed. Must be large because matching
-	// paths may be scattered across the vector space.
-	semanticSearchPathFilterK = 2000
-
-	// semanticSearchMinEf is the minimum ef parameter for HNSW search.
-	// ef controls how many neighbors are explored during search.
-	semanticSearchMinEf = 50
 )
-
-// traceFuncInfo holds function metadata for call path tracing.
-//
-// Used during trace_path execution to build the call graph and display
-// function locations in the trace results.
-type traceFuncInfo struct {
-	name     string // Function name
-	filePath string // Source file path
-	line     string // Line number in source file
-}
 
 // jsonRPCRequest represents a JSON-RPC 2.0 request from the MCP client.
 //
@@ -265,8 +246,8 @@ func runMCPServer(configPath string) {
 			continue
 		}
 
-		fmt.Fprintf(os.Stdout, "%s\n", respBytes)
-		os.Stdout.Sync()
+		_, _ = fmt.Fprintf(os.Stdout, "%s\n", respBytes)
+		_ = os.Stdout.Sync()
 
 		fmt.Fprintf(os.Stderr, "<- response sent for %s\n", req.Method)
 	}
@@ -804,263 +785,46 @@ func (s *mcpServer) getTools() []mcpTool {
 	}
 }
 
+// toolHandler is the signature for MCP tool handlers.
+type toolHandler func(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error)
+
+// toolHandlers maps tool names to their handlers.
+var toolHandlers = map[string]toolHandler{
+	"cie_schema":              handleSchema,
+	"cie_search_text":         handleSearchText,
+	"cie_find_function":       handleFindFunction,
+	"cie_find_callers":        handleFindCallers,
+	"cie_find_callees":        handleFindCallees,
+	"cie_list_files":          handleListFiles,
+	"cie_raw_query":           handleRawQuery,
+	"cie_get_function_code":   handleGetFunctionCode,
+	"cie_list_functions_in_file": handleListFunctionsInFile,
+	"cie_get_call_graph":      handleGetCallGraph,
+	"cie_find_similar_functions": handleFindSimilarFunctions,
+	"cie_get_file_summary":    handleGetFileSummary,
+	"cie_semantic_search":     handleSemanticSearch,
+	"cie_analyze":             handleAnalyze,
+	"cie_find_type":           handleFindType,
+	"cie_index_status":        handleIndexStatus,
+	"cie_grep":                handleGrep,
+	"cie_verify_absence":      handleVerifyAbsence,
+	"cie_list_services":       handleListServices,
+	"cie_directory_summary":   handleDirectorySummary,
+	"cie_list_endpoints":      handleListEndpoints,
+	"cie_find_implementations": handleFindImplementations,
+	"cie_trace_path":          handleTracePath,
+}
+
 func (s *mcpServer) handleToolCall(ctx context.Context, params mcpToolCallParams) (*mcpToolResult, error) {
-	var result *tools.ToolResult
-	var err error
-
-	switch params.Name {
-	case "cie_schema":
-		result, err = tools.GetSchema(ctx)
-
-	case "cie_search_text":
-		pattern, _ := params.Arguments["pattern"].(string)
-		literal, _ := params.Arguments["literal"].(bool)
-		searchIn, _ := params.Arguments["search_in"].(string)
-		filePattern, _ := params.Arguments["file_pattern"].(string)
-		excludePattern, _ := params.Arguments["exclude_pattern"].(string)
-		limit, _ := getIntArg(params.Arguments, "limit", 20)
-
-		result, err = tools.SearchText(ctx, s.client, tools.SearchTextArgs{
-			Pattern:        pattern,
-			FilePattern:    filePattern,
-			ExcludePattern: excludePattern,
-			SearchIn:       searchIn,
-			Literal:        literal,
-			Limit:          limit,
-		})
-
-	case "cie_find_function":
-		name, _ := params.Arguments["name"].(string)
-		exactMatch, _ := params.Arguments["exact_match"].(bool)
-		includeCode, _ := params.Arguments["include_code"].(bool)
-		result, err = tools.FindFunction(ctx, s.client, tools.FindFunctionArgs{
-			Name:        name,
-			ExactMatch:  exactMatch,
-			IncludeCode: includeCode,
-		})
-
-	case "cie_find_callers":
-		funcName, _ := params.Arguments["function_name"].(string)
-		includeIndirect, _ := params.Arguments["include_indirect"].(bool)
-		result, err = tools.FindCallers(ctx, s.client, tools.FindCallersArgs{
-			FunctionName:    funcName,
-			IncludeIndirect: includeIndirect,
-		})
-
-	case "cie_find_callees":
-		funcName, _ := params.Arguments["function_name"].(string)
-		result, err = tools.FindCallees(ctx, s.client, tools.FindCalleesArgs{
-			FunctionName: funcName,
-		})
-
-	case "cie_list_files":
-		pathPattern, _ := params.Arguments["path_pattern"].(string)
-		language, _ := params.Arguments["language"].(string)
-		limit := 50
-		if l, ok := params.Arguments["limit"].(float64); ok {
-			limit = int(l)
-		}
-		result, err = tools.ListFiles(ctx, s.client, tools.ListFilesArgs{
-			PathPattern: pathPattern,
-			Language:    language,
-			Limit:       limit,
-		})
-
-	case "cie_raw_query":
-		script, _ := params.Arguments["script"].(string)
-		result, err = tools.RawQuery(ctx, s.client, tools.RawQueryArgs{
-			Script: script,
-		})
-
-	case "cie_get_function_code":
-		funcName, _ := params.Arguments["function_name"].(string)
-		fullCode, _ := params.Arguments["full_code"].(bool)
-		result, err = tools.GetFunctionCode(ctx, s.client, tools.GetFunctionCodeArgs{
-			FunctionName: funcName,
-			FullCode:     fullCode,
-		})
-
-	case "cie_list_functions_in_file":
-		filePath, _ := params.Arguments["file_path"].(string)
-		result, err = tools.ListFunctionsInFile(ctx, s.client, tools.ListFunctionsInFileArgs{
-			FilePath: filePath,
-		})
-
-	case "cie_get_call_graph":
-		funcName, _ := params.Arguments["function_name"].(string)
-		result, err = tools.GetCallGraph(ctx, s.client, tools.GetCallGraphArgs{
-			FunctionName: funcName,
-		})
-
-	case "cie_find_similar_functions":
-		pattern, _ := params.Arguments["pattern"].(string)
-		result, err = tools.FindSimilarFunctions(ctx, s.client, tools.FindSimilarFunctionsArgs{
-			Pattern: pattern,
-		})
-
-	case "cie_get_file_summary":
-		filePath, _ := params.Arguments["file_path"].(string)
-		result, err = tools.GetFileSummary(ctx, s.client, tools.GetFileSummaryArgs{
-			FilePath: filePath,
-		})
-
-	case "cie_semantic_search":
-		query, _ := params.Arguments["query"].(string)
-		limit, _ := getIntArg(params.Arguments, "limit", 10)
-		role, _ := params.Arguments["role"].(string)
-		pathPattern, _ := params.Arguments["path_pattern"].(string)
-		excludePaths, _ := params.Arguments["exclude_paths"].(string)
-		excludeAnonymous := true // default
-		if v, ok := params.Arguments["exclude_anonymous"].(bool); ok {
-			excludeAnonymous = v
-		}
-		minSimilarity, _ := getFloatArg(params.Arguments, "min_similarity", 0)
-
-		result, err = tools.SemanticSearch(ctx, s.client, tools.SemanticSearchArgs{
-			Query:            query,
-			Limit:            limit,
-			Role:             role,
-			PathPattern:      pathPattern,
-			ExcludePaths:     excludePaths,
-			ExcludeAnonymous: excludeAnonymous,
-			MinSimilarity:    minSimilarity,
-			EmbeddingURL:     s.embeddingURL,
-			EmbeddingModel:   s.embeddingModel,
-		})
-
-	case "cie_analyze":
-		question, _ := params.Arguments["question"].(string)
-		pathPattern, _ := params.Arguments["path_pattern"].(string)
-		role, _ := params.Arguments["role"].(string)
-		result, err = tools.Analyze(ctx, s.client, tools.AnalyzeArgs{
-			Question:    question,
-			PathPattern: pathPattern,
-			Role:        role,
-		})
-
-	case "cie_find_type":
-		name, _ := params.Arguments["name"].(string)
-		kind, _ := params.Arguments["kind"].(string)
-		pathPattern, _ := params.Arguments["path_pattern"].(string)
-		limit, _ := getIntArg(params.Arguments, "limit", 20)
-		result, err = tools.FindType(ctx, s.client, tools.FindTypeArgs{
-			Name:        name,
-			Kind:        kind,
-			PathPattern: pathPattern,
-			Limit:       limit,
-		})
-
-	case "cie_index_status":
-		pathPattern, _ := params.Arguments["path_pattern"].(string)
-		result, err = tools.IndexStatus(ctx, s.client, pathPattern)
-
-	case "cie_grep":
-		text, _ := params.Arguments["text"].(string)
-		path, _ := params.Arguments["path"].(string)
-		excludePattern, _ := params.Arguments["exclude_pattern"].(string)
-		caseSensitive, _ := params.Arguments["case_sensitive"].(bool)
-		contextLines, _ := getIntArg(params.Arguments, "context", 0)
-		limit, _ := getIntArg(params.Arguments, "limit", 30)
-
-		// Handle texts array for multi-pattern search
-		var texts []string
-		if textsRaw, ok := params.Arguments["texts"].([]interface{}); ok {
-			for _, t := range textsRaw {
-				if s, ok := t.(string); ok {
-					texts = append(texts, s)
-				}
-			}
-		}
-
-		result, err = tools.Grep(ctx, s.client, tools.GrepArgs{
-			Text:           text,
-			Texts:          texts,
-			Path:           path,
-			ExcludePattern: excludePattern,
-			CaseSensitive:  caseSensitive,
-			ContextLines:   contextLines,
-			Limit:          limit,
-		})
-
-	case "cie_verify_absence":
-		path, _ := params.Arguments["path"].(string)
-		excludePattern, _ := params.Arguments["exclude_pattern"].(string)
-		caseSensitive, _ := params.Arguments["case_sensitive"].(bool)
-		severity, _ := params.Arguments["severity"].(string)
-
-		// Handle patterns array
-		var patterns []string
-		if patternsRaw, ok := params.Arguments["patterns"].([]interface{}); ok {
-			for _, p := range patternsRaw {
-				if s, ok := p.(string); ok {
-					patterns = append(patterns, s)
-				}
-			}
-		}
-
-		result, err = tools.VerifyAbsence(ctx, s.client, tools.VerifyAbsenceArgs{
-			Patterns:       patterns,
-			Path:           path,
-			ExcludePattern: excludePattern,
-			CaseSensitive:  caseSensitive,
-			Severity:       severity,
-		})
-
-	case "cie_list_services":
-		pathPattern, _ := params.Arguments["path_pattern"].(string)
-		serviceName, _ := params.Arguments["service_name"].(string)
-		result, err = tools.ListServices(ctx, s.client, pathPattern, serviceName)
-
-	case "cie_directory_summary":
-		path, _ := params.Arguments["path"].(string)
-		maxFuncs, _ := getIntArg(params.Arguments, "max_functions_per_file", 5)
-		result, err = tools.DirectorySummary(ctx, s.client, path, maxFuncs)
-
-	case "cie_list_endpoints":
-		pathPattern, _ := params.Arguments["path_pattern"].(string)
-		pathFilter, _ := params.Arguments["path_filter"].(string)
-		method, _ := params.Arguments["method"].(string)
-		limit, _ := getIntArg(params.Arguments, "limit", 100)
-		result, err = tools.ListEndpoints(ctx, s.client, tools.ListEndpointsArgs{
-			PathPattern: pathPattern,
-			PathFilter:  pathFilter,
-			Method:      method,
-			Limit:       limit,
-		})
-
-	case "cie_find_implementations":
-		interfaceName, _ := params.Arguments["interface_name"].(string)
-		pathPattern, _ := params.Arguments["path_pattern"].(string)
-		limit, _ := getIntArg(params.Arguments, "limit", 20)
-
-		result, err = tools.FindImplementations(ctx, s.client, tools.FindImplementationsArgs{
-			InterfaceName: interfaceName,
-			PathPattern:   pathPattern,
-			Limit:         limit,
-		})
-
-	case "cie_trace_path":
-		target, _ := params.Arguments["target"].(string)
-		source, _ := params.Arguments["source"].(string)
-		pathPattern, _ := params.Arguments["path_pattern"].(string)
-		maxPaths, _ := getIntArg(params.Arguments, "max_paths", 3)
-		maxDepth, _ := getIntArg(params.Arguments, "max_depth", 5)
-
-		result, err = tools.TracePath(ctx, s.client, tools.TracePathArgs{
-			Target:      target,
-			Source:      source,
-			PathPattern: pathPattern,
-			MaxPaths:    maxPaths,
-			MaxDepth:    maxDepth,
-		})
-
-	default:
+	handler, ok := toolHandlers[params.Name]
+	if !ok {
 		return &mcpToolResult{
 			Content: []mcpContent{{Type: "text", Text: fmt.Sprintf("Unknown tool: %s", params.Name)}},
 			IsError: true,
 		}, nil
 	}
 
+	result, err := handler(ctx, s, params.Arguments)
 	if err != nil {
 		return s.formatError(params.Name, err), nil
 	}
@@ -1069,6 +833,269 @@ func (s *mcpServer) handleToolCall(ctx context.Context, params mcpToolCallParams
 		Content: []mcpContent{{Type: "text", Text: result.Text}},
 		IsError: result.IsError,
 	}, nil
+}
+
+func handleSchema(ctx context.Context, _ *mcpServer, _ map[string]any) (*tools.ToolResult, error) {
+	return tools.GetSchema(ctx)
+}
+
+func handleSearchText(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
+	pattern, _ := args["pattern"].(string)
+	literal, _ := args["literal"].(bool)
+	searchIn, _ := args["search_in"].(string)
+	filePattern, _ := args["file_pattern"].(string)
+	excludePattern, _ := args["exclude_pattern"].(string)
+	limit, _ := getIntArg(args, "limit", 20)
+
+	return tools.SearchText(ctx, s.client, tools.SearchTextArgs{
+		Pattern:        pattern,
+		FilePattern:    filePattern,
+		ExcludePattern: excludePattern,
+		SearchIn:       searchIn,
+		Literal:        literal,
+		Limit:          limit,
+	})
+}
+
+func handleFindFunction(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
+	name, _ := args["name"].(string)
+	exactMatch, _ := args["exact_match"].(bool)
+	includeCode, _ := args["include_code"].(bool)
+	return tools.FindFunction(ctx, s.client, tools.FindFunctionArgs{
+		Name:        name,
+		ExactMatch:  exactMatch,
+		IncludeCode: includeCode,
+	})
+}
+
+func handleFindCallers(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
+	funcName, _ := args["function_name"].(string)
+	includeIndirect, _ := args["include_indirect"].(bool)
+	return tools.FindCallers(ctx, s.client, tools.FindCallersArgs{
+		FunctionName:    funcName,
+		IncludeIndirect: includeIndirect,
+	})
+}
+
+func handleFindCallees(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
+	funcName, _ := args["function_name"].(string)
+	return tools.FindCallees(ctx, s.client, tools.FindCalleesArgs{
+		FunctionName: funcName,
+	})
+}
+
+func handleListFiles(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
+	pathPattern, _ := args["path_pattern"].(string)
+	language, _ := args["language"].(string)
+	limit := 50
+	if l, ok := args["limit"].(float64); ok {
+		limit = int(l)
+	}
+	return tools.ListFiles(ctx, s.client, tools.ListFilesArgs{
+		PathPattern: pathPattern,
+		Language:    language,
+		Limit:       limit,
+	})
+}
+
+func handleRawQuery(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
+	script, _ := args["script"].(string)
+	return tools.RawQuery(ctx, s.client, tools.RawQueryArgs{
+		Script: script,
+	})
+}
+
+func handleGetFunctionCode(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
+	funcName, _ := args["function_name"].(string)
+	fullCode, _ := args["full_code"].(bool)
+	return tools.GetFunctionCode(ctx, s.client, tools.GetFunctionCodeArgs{
+		FunctionName: funcName,
+		FullCode:     fullCode,
+	})
+}
+
+func handleListFunctionsInFile(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
+	filePath, _ := args["file_path"].(string)
+	return tools.ListFunctionsInFile(ctx, s.client, tools.ListFunctionsInFileArgs{
+		FilePath: filePath,
+	})
+}
+
+func handleGetCallGraph(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
+	funcName, _ := args["function_name"].(string)
+	return tools.GetCallGraph(ctx, s.client, tools.GetCallGraphArgs{
+		FunctionName: funcName,
+	})
+}
+
+func handleFindSimilarFunctions(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
+	pattern, _ := args["pattern"].(string)
+	return tools.FindSimilarFunctions(ctx, s.client, tools.FindSimilarFunctionsArgs{
+		Pattern: pattern,
+	})
+}
+
+func handleGetFileSummary(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
+	filePath, _ := args["file_path"].(string)
+	return tools.GetFileSummary(ctx, s.client, tools.GetFileSummaryArgs{
+		FilePath: filePath,
+	})
+}
+
+func handleSemanticSearch(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
+	query, _ := args["query"].(string)
+	limit, _ := getIntArg(args, "limit", 10)
+	role, _ := args["role"].(string)
+	pathPattern, _ := args["path_pattern"].(string)
+	excludePaths, _ := args["exclude_paths"].(string)
+	excludeAnonymous := true
+	if v, ok := args["exclude_anonymous"].(bool); ok {
+		excludeAnonymous = v
+	}
+	minSimilarity, _ := getFloatArg(args, "min_similarity", 0)
+
+	return tools.SemanticSearch(ctx, s.client, tools.SemanticSearchArgs{
+		Query:            query,
+		Limit:            limit,
+		Role:             role,
+		PathPattern:      pathPattern,
+		ExcludePaths:     excludePaths,
+		ExcludeAnonymous: excludeAnonymous,
+		MinSimilarity:    minSimilarity,
+		EmbeddingURL:     s.embeddingURL,
+		EmbeddingModel:   s.embeddingModel,
+	})
+}
+
+func handleAnalyze(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
+	question, _ := args["question"].(string)
+	pathPattern, _ := args["path_pattern"].(string)
+	role, _ := args["role"].(string)
+	return tools.Analyze(ctx, s.client, tools.AnalyzeArgs{
+		Question:    question,
+		PathPattern: pathPattern,
+		Role:        role,
+	})
+}
+
+func handleFindType(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
+	name, _ := args["name"].(string)
+	kind, _ := args["kind"].(string)
+	pathPattern, _ := args["path_pattern"].(string)
+	limit, _ := getIntArg(args, "limit", 20)
+	return tools.FindType(ctx, s.client, tools.FindTypeArgs{
+		Name:        name,
+		Kind:        kind,
+		PathPattern: pathPattern,
+		Limit:       limit,
+	})
+}
+
+func handleIndexStatus(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
+	pathPattern, _ := args["path_pattern"].(string)
+	return tools.IndexStatus(ctx, s.client, pathPattern)
+}
+
+func handleGrep(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
+	text, _ := args["text"].(string)
+	path, _ := args["path"].(string)
+	excludePattern, _ := args["exclude_pattern"].(string)
+	caseSensitive, _ := args["case_sensitive"].(bool)
+	contextLines, _ := getIntArg(args, "context", 0)
+	limit, _ := getIntArg(args, "limit", 30)
+
+	texts := extractStringArray(args, "texts")
+
+	return tools.Grep(ctx, s.client, tools.GrepArgs{
+		Text:           text,
+		Texts:          texts,
+		Path:           path,
+		ExcludePattern: excludePattern,
+		CaseSensitive:  caseSensitive,
+		ContextLines:   contextLines,
+		Limit:          limit,
+	})
+}
+
+func handleVerifyAbsence(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
+	path, _ := args["path"].(string)
+	excludePattern, _ := args["exclude_pattern"].(string)
+	caseSensitive, _ := args["case_sensitive"].(bool)
+	severity, _ := args["severity"].(string)
+
+	patterns := extractStringArray(args, "patterns")
+
+	return tools.VerifyAbsence(ctx, s.client, tools.VerifyAbsenceArgs{
+		Patterns:       patterns,
+		Path:           path,
+		ExcludePattern: excludePattern,
+		CaseSensitive:  caseSensitive,
+		Severity:       severity,
+	})
+}
+
+func handleListServices(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
+	pathPattern, _ := args["path_pattern"].(string)
+	serviceName, _ := args["service_name"].(string)
+	return tools.ListServices(ctx, s.client, pathPattern, serviceName)
+}
+
+func handleDirectorySummary(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
+	path, _ := args["path"].(string)
+	maxFuncs, _ := getIntArg(args, "max_functions_per_file", 5)
+	return tools.DirectorySummary(ctx, s.client, path, maxFuncs)
+}
+
+func handleListEndpoints(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
+	pathPattern, _ := args["path_pattern"].(string)
+	pathFilter, _ := args["path_filter"].(string)
+	method, _ := args["method"].(string)
+	limit, _ := getIntArg(args, "limit", 100)
+	return tools.ListEndpoints(ctx, s.client, tools.ListEndpointsArgs{
+		PathPattern: pathPattern,
+		PathFilter:  pathFilter,
+		Method:      method,
+		Limit:       limit,
+	})
+}
+
+func handleFindImplementations(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
+	interfaceName, _ := args["interface_name"].(string)
+	pathPattern, _ := args["path_pattern"].(string)
+	limit, _ := getIntArg(args, "limit", 20)
+	return tools.FindImplementations(ctx, s.client, tools.FindImplementationsArgs{
+		InterfaceName: interfaceName,
+		PathPattern:   pathPattern,
+		Limit:         limit,
+	})
+}
+
+func handleTracePath(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
+	target, _ := args["target"].(string)
+	source, _ := args["source"].(string)
+	pathPattern, _ := args["path_pattern"].(string)
+	maxPaths, _ := getIntArg(args, "max_paths", 3)
+	maxDepth, _ := getIntArg(args, "max_depth", 5)
+	return tools.TracePath(ctx, s.client, tools.TracePathArgs{
+		Target:      target,
+		Source:      source,
+		PathPattern: pathPattern,
+		MaxPaths:    maxPaths,
+		MaxDepth:    maxDepth,
+	})
+}
+
+// extractStringArray extracts a string array from the arguments map.
+func extractStringArray(args map[string]any, key string) []string {
+	var result []string
+	if raw, ok := args[key].([]interface{}); ok {
+		for _, item := range raw {
+			if s, ok := item.(string); ok {
+				result = append(result, s)
+			}
+		}
+	}
+	return result
 }
 
 // formatError creates an actionable error message based on the error type and tool

@@ -76,9 +76,9 @@ func GetProjectMeta(ctx context.Context, client tools.Querier, projectID string)
 	case float64:
 		meta.LastCommittedIndex = uint64(v)
 	case int64:
-		meta.LastCommittedIndex = uint64(v)
+		meta.LastCommittedIndex = uint64(v) //nolint:gosec // G115: DB stores non-negative index values
 	case int:
-		meta.LastCommittedIndex = uint64(v)
+		meta.LastCommittedIndex = uint64(v) //nolint:gosec // G115: DB stores non-negative index values
 	case string:
 		n, _ := strconv.ParseUint(v, 10, 64)
 		meta.LastCommittedIndex = n

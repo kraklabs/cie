@@ -147,7 +147,7 @@ Examples:
 		}
 		os.Exit(1)
 	}
-	defer backend.Close()
+	defer func() { _ = backend.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
@@ -175,7 +175,7 @@ Examples:
 func outputQueryError(err error) {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
-	enc.Encode(map[string]any{
+	_ = enc.Encode(map[string]any{
 		"error": err.Error(),
 	})
 }
@@ -191,7 +191,7 @@ func outputQueryJSON(result *storage.QueryResult) {
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
-	enc.Encode(output)
+	_ = enc.Encode(output)
 }
 
 // printQueryResult prints query results as a formatted table to stdout.
@@ -209,33 +209,33 @@ func printQueryResult(result *storage.QueryResult) {
 	// Print headers
 	for i, h := range result.Headers {
 		if i > 0 {
-			fmt.Fprint(w, "\t")
+			_, _ = fmt.Fprint(w, "\t")
 		}
-		fmt.Fprint(w, strings.ToUpper(h))
+		_, _ = fmt.Fprint(w, strings.ToUpper(h))
 	}
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w)
 
 	// Print separator
 	for i := range result.Headers {
 		if i > 0 {
-			fmt.Fprint(w, "\t")
+			_, _ = fmt.Fprint(w, "\t")
 		}
-		fmt.Fprint(w, "---")
+		_, _ = fmt.Fprint(w, "---")
 	}
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w)
 
 	// Print rows
 	for _, row := range result.Rows {
 		for i, cell := range row {
 			if i > 0 {
-				fmt.Fprint(w, "\t")
+				_, _ = fmt.Fprint(w, "\t")
 			}
-			fmt.Fprint(w, formatCell(cell))
+			_, _ = fmt.Fprint(w, formatCell(cell))
 		}
-		fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w)
 	}
 
-	w.Flush()
+	_ = w.Flush()
 
 	fmt.Printf("\n(%d rows)\n", len(result.Rows))
 }

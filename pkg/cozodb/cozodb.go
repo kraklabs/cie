@@ -65,7 +65,7 @@ func New(engine, path string, options map[string]any) (CozoDB, error) {
 
 	// Convert options map to JSON string
 	optionsJSON := "{}"
-	if options != nil && len(options) > 0 {
+	if len(options) > 0 {
 		optBytes, err := json.Marshal(options)
 		if err != nil {
 			return CozoDB{}, fmt.Errorf("marshal options: %w", err)
@@ -120,7 +120,7 @@ func (db *CozoDB) runQuery(script string, params map[string]any, immutable bool)
 
 	// Convert params map to JSON string
 	paramsJSON := "{}"
-	if params != nil && len(params) > 0 {
+	if len(params) > 0 {
 		paramBytes, err := json.Marshal(params)
 		if err != nil {
 			return NamedRows{}, fmt.Errorf("marshal params: %w", err)

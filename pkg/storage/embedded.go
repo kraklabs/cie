@@ -69,7 +69,7 @@ func NewEmbeddedBackend(config EmbeddedConfig) (*EmbeddedBackend, error) {
 	}
 
 	// Ensure data directory exists
-	if err := os.MkdirAll(config.DataDir, 0755); err != nil {
+	if err := os.MkdirAll(config.DataDir, 0750); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
 

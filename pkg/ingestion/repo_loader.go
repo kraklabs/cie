@@ -350,7 +350,7 @@ func (rl *RepoLoader) walkRepository(rootPath string, excludeGlobs []string, max
 			// Check if directory should be excluded
 			relPath, err := filepath.Rel(rootPath, path)
 			if err != nil {
-				return nil
+				return nil //nolint:nilerr // Continue walking on path error
 			}
 			if rl.shouldExclude(relPath, excludeGlobs) {
 				skipReasons["excluded_dir"]++
@@ -362,7 +362,7 @@ func (rl *RepoLoader) walkRepository(rootPath string, excludeGlobs []string, max
 		// Check if file should be excluded
 		relPath, err := filepath.Rel(rootPath, path)
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // Continue walking on path error
 		}
 		if rl.shouldExclude(relPath, excludeGlobs) {
 			skipReasons["excluded"]++
@@ -372,7 +372,7 @@ func (rl *RepoLoader) walkRepository(rootPath string, excludeGlobs []string, max
 		// Get file info
 		info, err := d.Info()
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // Continue walking on info error
 		}
 
 		// Check size limit
@@ -511,71 +511,20 @@ func matchGlobRecursive(path, pattern string, pi, pti int) bool {
 			return false
 		}
 
-		// Handle **
-		if pti+1 < len(pattern) && pattern[pti] == '*' && pattern[pti+1] == '*' {
-			// ** matches any sequence including separators
-			// Skip the **
-			nextPti := pti + 2
-			// Skip trailing / after ** if present
-			if nextPti < len(pattern) && pattern[nextPti] == '/' {
-				nextPti++
-			}
-
-			// If ** is at the end, it matches everything
-			if nextPti >= len(pattern) {
-				return true
-			}
-
-			// Try matching ** against progressively more of the path
-			for i := pi; i <= len(path); i++ {
-				if matchGlobRecursive(path, pattern, i, nextPti) {
-					return true
-				}
-			}
-			return false
+		// Handle ** (matches any sequence including separators)
+		if isDoubleStarAt(pattern, pti) {
+			return matchDoubleStar(path, pattern, pi, pti)
 		}
 
-		// Handle single *
+		// Handle single * (matches non-separator characters)
 		if pattern[pti] == '*' {
-			// * matches any sequence of non-separator characters
-			nextPti := pti + 1
-
-			// If * is at the end of pattern (or before /), match rest of component
-			if nextPti >= len(pattern) {
-				// Match to end, but stop at /
-				for i := pi; i <= len(path); i++ {
-					if i == len(path) || path[i] == '/' {
-						if nextPti >= len(pattern) && i == len(path) {
-							return true
-						}
-						if nextPti < len(pattern) && matchGlobRecursive(path, pattern, i, nextPti) {
-							return true
-						}
-					}
-				}
-				// Also try matching nothing
-				if matchGlobRecursive(path, pattern, pi, nextPti) {
-					return true
-				}
-				return false
-			}
-
-			// Try matching * against progressively more characters (but not /)
-			for i := pi; i <= len(path); i++ {
-				if i > pi && path[i-1] == '/' {
-					break // * doesn't match across /
-				}
-				if matchGlobRecursive(path, pattern, i, nextPti) {
-					return true
-				}
-			}
-			return false
+			return matchSingleStar(path, pattern, pi, pti)
 		}
 
-		// Handle ?
+		// Handle ? (matches single non-separator character)
 		if pattern[pti] == '?' {
 			if pi >= len(path) || path[pi] == '/' {
-				return false // ? doesn't match / or end of string
+				return false
 			}
 			pi++
 			pti++
@@ -584,47 +533,16 @@ func matchGlobRecursive(path, pattern string, pi, pti int) bool {
 
 		// Handle character class [...]
 		if pattern[pti] == '[' {
-			if pi >= len(path) {
-				return false
-			}
-
-			// Find the closing ]
-			closeIdx := pti + 1
-			if closeIdx < len(pattern) && (pattern[closeIdx] == '!' || pattern[closeIdx] == '^') {
-				closeIdx++
-			}
-			if closeIdx < len(pattern) && pattern[closeIdx] == ']' {
-				closeIdx++
-			}
-			for closeIdx < len(pattern) && pattern[closeIdx] != ']' {
-				closeIdx++
-			}
-			if closeIdx >= len(pattern) {
-				// Malformed pattern, treat [ as literal
-				if path[pi] != '[' {
-					return false
-				}
-				pi++
-				pti++
-				continue
-			}
-
-			// Parse and match character class
-			classContent := pattern[pti+1 : closeIdx]
-			matched := matchCharClass(path[pi], classContent)
+			matched, newPi, newPti := matchCharClassPattern(path, pattern, pi, pti)
 			if !matched {
 				return false
 			}
-			pi++
-			pti = closeIdx + 1
+			pi, pti = newPi, newPti
 			continue
 		}
 
 		// Handle literal character
-		if pi >= len(path) {
-			return false
-		}
-		if path[pi] != pattern[pti] {
+		if pi >= len(path) || path[pi] != pattern[pti] {
 			return false
 		}
 		pi++
@@ -632,6 +550,111 @@ func matchGlobRecursive(path, pattern string, pi, pti int) bool {
 	}
 
 	return pi == len(path) && pti == len(pattern)
+}
+
+// isDoubleStarAt checks if pattern has ** at position pti.
+func isDoubleStarAt(pattern string, pti int) bool {
+	return pti+1 < len(pattern) && pattern[pti] == '*' && pattern[pti+1] == '*'
+}
+
+// matchDoubleStar handles ** glob pattern matching.
+func matchDoubleStar(path, pattern string, pi, pti int) bool {
+	// Skip the **
+	nextPti := pti + 2
+	// Skip trailing / after ** if present
+	if nextPti < len(pattern) && pattern[nextPti] == '/' {
+		nextPti++
+	}
+
+	// If ** is at the end, it matches everything
+	if nextPti >= len(pattern) {
+		return true
+	}
+
+	// Try matching ** against progressively more of the path
+	for i := pi; i <= len(path); i++ {
+		if matchGlobRecursive(path, pattern, i, nextPti) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchSingleStar handles single * glob pattern matching.
+func matchSingleStar(path, pattern string, pi, pti int) bool {
+	nextPti := pti + 1
+
+	// If * is at the end of pattern
+	if nextPti >= len(pattern) {
+		return matchStarAtEnd(path, pattern, pi, nextPti)
+	}
+
+	// Try matching * against progressively more characters (but not /)
+	for i := pi; i <= len(path); i++ {
+		if i > pi && path[i-1] == '/' {
+			break // * doesn't match across /
+		}
+		if matchGlobRecursive(path, pattern, i, nextPti) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchStarAtEnd handles * at end of pattern.
+func matchStarAtEnd(path, pattern string, pi, nextPti int) bool {
+	for i := pi; i <= len(path); i++ {
+		if i == len(path) || path[i] == '/' {
+			if nextPti >= len(pattern) && i == len(path) {
+				return true
+			}
+			if nextPti < len(pattern) && matchGlobRecursive(path, pattern, i, nextPti) {
+				return true
+			}
+		}
+	}
+	// Also try matching nothing
+	return matchGlobRecursive(path, pattern, pi, nextPti)
+}
+
+// matchCharClassPattern handles [...] character class matching.
+// Returns (matched, newPi, newPti).
+func matchCharClassPattern(path, pattern string, pi, pti int) (bool, int, int) {
+	if pi >= len(path) {
+		return false, pi, pti
+	}
+
+	// Find the closing ]
+	closeIdx := findCharClassEnd(pattern, pti)
+	if closeIdx >= len(pattern) {
+		// Malformed pattern, treat [ as literal
+		if path[pi] != '[' {
+			return false, pi, pti
+		}
+		return true, pi + 1, pti + 1
+	}
+
+	// Parse and match character class
+	classContent := pattern[pti+1 : closeIdx]
+	if !matchCharClass(path[pi], classContent) {
+		return false, pi, pti
+	}
+	return true, pi + 1, closeIdx + 1
+}
+
+// findCharClassEnd finds the closing ] of a character class.
+func findCharClassEnd(pattern string, pti int) int {
+	closeIdx := pti + 1
+	if closeIdx < len(pattern) && (pattern[closeIdx] == '!' || pattern[closeIdx] == '^') {
+		closeIdx++
+	}
+	if closeIdx < len(pattern) && pattern[closeIdx] == ']' {
+		closeIdx++
+	}
+	for closeIdx < len(pattern) && pattern[closeIdx] != ']' {
+		closeIdx++
+	}
+	return closeIdx
 }
 
 // matchCharClass checks if a character matches a character class.

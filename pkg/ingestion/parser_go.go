@@ -427,68 +427,6 @@ func extractSimpleName(fullName string) string {
 	return fullName
 }
 
-// extractGoCallsFromNode extracts function calls from a function's AST node.
-func (p *TreeSitterParser) extractGoCallsFromNode(fnNode *sitter.Node, content []byte, callerID string, funcNameToID map[string]string) []CallsEdge {
-	var calls []CallsEdge
-
-	if fnNode == nil {
-		return calls
-	}
-
-	// Find the body of the function
-	bodyNode := fnNode.ChildByFieldName("body")
-	if bodyNode == nil {
-		// For func_literal, look for block child
-		for i := 0; i < int(fnNode.ChildCount()); i++ {
-			child := fnNode.Child(i)
-			if child.Type() == "block" {
-				bodyNode = child
-				break
-			}
-		}
-	}
-	if bodyNode == nil {
-		return calls
-	}
-
-	// Walk to find call expressions
-	p.walkGoCallExpressions(bodyNode, content, callerID, funcNameToID, &calls)
-
-	return calls
-}
-
-// walkGoCallExpressions finds call expressions within a node.
-func (p *TreeSitterParser) walkGoCallExpressions(node *sitter.Node, content []byte, callerID string, funcNameToID map[string]string, calls *[]CallsEdge) {
-	if node == nil {
-		return
-	}
-
-	if node.Type() == "call_expression" {
-		funcNode := node.ChildByFieldName("function")
-		if funcNode != nil {
-			calleeName := p.extractGoCalleeName(funcNode, content)
-			if calleeName != "" {
-				// Look up callee ID
-				if calleeID, exists := funcNameToID[calleeName]; exists {
-					// Avoid self-calls (can happen with recursion, but we only want distinct edges)
-					if calleeID != callerID {
-						*calls = append(*calls, CallsEdge{
-							CallerID: callerID,
-							CalleeID: calleeID,
-						})
-					}
-				}
-			}
-		}
-	}
-
-	// Recurse into children
-	for i := 0; i < int(node.ChildCount()); i++ {
-		child := node.Child(i)
-		p.walkGoCallExpressions(child, content, callerID, funcNameToID, calls)
-	}
-}
-
 // extractGoCalleeName extracts the function name from a Go call expression.
 func (p *TreeSitterParser) extractGoCalleeName(node *sitter.Node, content []byte) string {
 	if node == nil {
@@ -930,91 +868,121 @@ func (p *Parser) extractGoCallsSimplified(functions []FunctionEntity, content st
 	return calls
 }
 
+// goParseState tracks state during Go code parsing.
+type goParseState struct {
+	code          string
+	pos           int
+	inString      bool
+	inComment     bool
+	inLineComment bool
+}
+
 // findGoCalls extracts potential function call names from Go code.
 // Looks for patterns like: identifier(, obj.method(, etc.
 func (p *Parser) findGoCalls(code string) []string {
 	var calls []string
-	inString := false
-	inComment := false
-	inLineComment := false
+	state := &goParseState{code: code}
 
-	i := 0
-	for i < len(code) {
-		// Handle comments
-		if !inString && i+1 < len(code) {
-			if code[i] == '/' && code[i+1] == '/' {
-				inLineComment = true
-				i += 2
-				continue
-			}
-			if code[i] == '/' && code[i+1] == '*' {
-				inComment = true
-				i += 2
-				continue
-			}
-		}
-		if inLineComment && code[i] == '\n' {
-			inLineComment = false
-			i++
+	for state.pos < len(code) {
+		if state.handleGoComment() {
 			continue
 		}
-		if inComment && i+1 < len(code) && code[i] == '*' && code[i+1] == '/' {
-			inComment = false
-			i += 2
+		if state.inComment || state.inLineComment {
+			state.pos++
 			continue
 		}
-		if inComment || inLineComment {
-			i++
+		if state.handleGoString() {
 			continue
 		}
+		if state.inString {
+			state.pos++
+			continue
+		}
+		if call := state.extractGoCall(); call != "" {
+			calls = append(calls, call)
+			continue
+		}
+		state.pos++
+	}
+	return calls
+}
 
-		// Handle strings
-		if code[i] == '"' && (i == 0 || code[i-1] != '\\') {
-			inString = !inString
-			i++
-			continue
+// handleGoComment handles Go comments.
+func (s *goParseState) handleGoComment() bool {
+	if s.inString {
+		return false
+	}
+	if s.pos+1 < len(s.code) {
+		if s.code[s.pos] == '/' && s.code[s.pos+1] == '/' {
+			s.inLineComment = true
+			s.pos += 2
+			return true
 		}
-		if code[i] == '`' {
-			// Skip raw string
-			i++
-			for i < len(code) && code[i] != '`' {
-				i++
-			}
-			i++
-			continue
+		if s.code[s.pos] == '/' && s.code[s.pos+1] == '*' {
+			s.inComment = true
+			s.pos += 2
+			return true
 		}
-		if inString {
-			i++
-			continue
+	}
+	if s.inLineComment && s.pos < len(s.code) && s.code[s.pos] == '\n' {
+		s.inLineComment = false
+		s.pos++
+		return true
+	}
+	if s.inComment && s.pos+1 < len(s.code) && s.code[s.pos] == '*' && s.code[s.pos+1] == '/' {
+		s.inComment = false
+		s.pos += 2
+		return true
+	}
+	return false
+}
+
+// handleGoString handles Go strings including raw strings.
+func (s *goParseState) handleGoString() bool {
+	if s.pos >= len(s.code) {
+		return false
+	}
+	c := s.code[s.pos]
+	// Regular string toggle
+	if c == '"' && (s.pos == 0 || s.code[s.pos-1] != '\\') {
+		s.inString = !s.inString
+		s.pos++
+		return true
+	}
+	// Raw string - skip entirely
+	if c == '`' {
+		s.pos++
+		for s.pos < len(s.code) && s.code[s.pos] != '`' {
+			s.pos++
 		}
-
-		// Look for identifier followed by (
-		if isGoIdentStart(code[i]) {
-			start := i
-			for i < len(code) && isGoIdentChar(code[i]) {
-				i++
-			}
-			name := code[start:i]
-
-			// Skip whitespace
-			for i < len(code) && (code[i] == ' ' || code[i] == '\t' || code[i] == '\n') {
-				i++
-			}
-
-			// Check for ( - this is a function call
-			if i < len(code) && code[i] == '(' {
-				// Skip keywords
-				if !isGoKeyword(name) {
-					calls = append(calls, name)
-				}
-			}
-			continue
+		if s.pos < len(s.code) {
+			s.pos++
 		}
+		return true
+	}
+	return false
+}
 
-		i++
+// extractGoCall extracts a function call if present.
+func (s *goParseState) extractGoCall() string {
+	if s.pos >= len(s.code) || !isGoIdentStart(s.code[s.pos]) {
+		return ""
+	}
+	start := s.pos
+	for s.pos < len(s.code) && isGoIdentChar(s.code[s.pos]) {
+		s.pos++
+	}
+	name := s.code[start:s.pos]
+
+	// Skip whitespace
+	for s.pos < len(s.code) && (s.code[s.pos] == ' ' || s.code[s.pos] == '\t' || s.code[s.pos] == '\n') {
+		s.pos++
 	}
 
-	return calls
+	if s.pos < len(s.code) && s.code[s.pos] == '(' && !isGoKeyword(name) {
+		return name
+	}
+	return ""
 }
 
 // isGoIdentStart checks if c can start a Go identifier.

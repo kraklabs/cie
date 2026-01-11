@@ -159,7 +159,7 @@ func LoadConfig(configPath string) (*Config, error) {
 		}
 	}
 
-	data, err := os.ReadFile(configPath)
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: Path comes from user config or discovery
 	if err != nil {
 		return nil, fmt.Errorf("read config file: %w", err)
 	}
@@ -198,11 +198,11 @@ func SaveConfig(cfg *Config, configPath string) error {
 
 	// Ensure directory exists
 	dir := filepath.Dir(configPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0750); err != nil {
 		return fmt.Errorf("create config directory: %w", err)
 	}
 
-	if err := os.WriteFile(configPath, data, 0644); err != nil {
+	if err := os.WriteFile(configPath, data, 0600); err != nil {
 		return fmt.Errorf("write config file: %w", err)
 	}
 

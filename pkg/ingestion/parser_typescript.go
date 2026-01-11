@@ -80,78 +80,122 @@ func (p *TreeSitterParser) parseTypeScriptAST(content []byte, filePath string) (
 	return functions, types, calls, nil
 }
 
+// tsWalkContext holds context for TypeScript AST walking.
+type tsWalkContext struct {
+	content     []byte
+	filePath    string
+	functions   *[]FunctionEntity
+	funcNameToID map[string]string
+	anonCounter *int
+}
+
 // walkTSFunctions walks TypeScript AST (extends JS walker with TS-specific nodes).
 func (p *TreeSitterParser) walkTSFunctions(node *sitter.Node, content []byte, filePath string, functions *[]FunctionEntity, funcNameToID map[string]string, anonCounter *int) {
 	if node == nil {
 		return
 	}
 
-	nodeType := node.Type()
-
-	// All JS function types
-	if nodeType == "function_declaration" {
-		fn := p.extractJSFunction(node, content, filePath)
-		if fn != nil {
-			*functions = append(*functions, *fn)
-			funcNameToID[fn.Name] = fn.ID
-		}
+	ctx := &tsWalkContext{
+		content:     content,
+		filePath:    filePath,
+		functions:   functions,
+		funcNameToID: funcNameToID,
+		anonCounter: anonCounter,
 	}
 
-	if nodeType == "variable_declarator" {
-		nameNode := node.ChildByFieldName("name")
-		valueNode := node.ChildByFieldName("value")
-		if nameNode != nil && valueNode != nil {
-			valueType := valueNode.Type()
-			if valueType == "arrow_function" || valueType == "function_expression" || valueType == "function" {
-				fn := p.extractJSArrowOrExpressionFunction(nameNode, valueNode, content, filePath)
-				if fn != nil {
-					*functions = append(*functions, *fn)
-					funcNameToID[fn.Name] = fn.ID
-				}
-			}
-		}
-	}
-
-	if nodeType == "method_definition" {
-		fn := p.extractJSMethod(node, content, filePath)
-		if fn != nil {
-			*functions = append(*functions, *fn)
-			funcNameToID[fn.Name] = fn.ID
-		}
-	}
-
-	// TypeScript-specific: method_signature in interfaces
-	if nodeType == "method_signature" {
-		fn := p.extractTSMethodSignature(node, content, filePath)
-		if fn != nil {
-			*functions = append(*functions, *fn)
-			funcNameToID[fn.Name] = fn.ID
-		}
-	}
-
-	// TypeScript-specific: function_signature in declarations
-	if nodeType == "function_signature" {
-		fn := p.extractTSFunctionSignature(node, content, filePath)
-		if fn != nil {
-			*functions = append(*functions, *fn)
-			funcNameToID[fn.Name] = fn.ID
-		}
-	}
-
-	if nodeType == "arrow_function" {
-		parent := node.Parent()
-		if parent == nil || parent.Type() != "variable_declarator" {
-			*anonCounter++
-			fn := p.extractJSAnonymousArrow(node, content, filePath, *anonCounter)
-			if fn != nil {
-				*functions = append(*functions, *fn)
-			}
-		}
-	}
+	p.processTSNode(node, ctx)
 
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
 		p.walkTSFunctions(child, content, filePath, functions, funcNameToID, anonCounter)
+	}
+}
+
+// processTSNode handles a single TypeScript node during AST walk.
+func (p *TreeSitterParser) processTSNode(node *sitter.Node, ctx *tsWalkContext) {
+	switch node.Type() {
+	case "function_declaration":
+		p.handleTSFunctionDecl(node, ctx)
+	case "variable_declarator":
+		p.handleTSVariableDeclarator(node, ctx)
+	case "method_definition":
+		p.handleTSMethodDef(node, ctx)
+	case "method_signature":
+		p.handleTSMethodSig(node, ctx)
+	case "function_signature":
+		p.handleTSFunctionSig(node, ctx)
+	case "arrow_function":
+		p.handleTSArrowFunction(node, ctx)
+	}
+}
+
+// handleTSFunctionDecl handles a function declaration node.
+func (p *TreeSitterParser) handleTSFunctionDecl(node *sitter.Node, ctx *tsWalkContext) {
+	fn := p.extractJSFunction(node, ctx.content, ctx.filePath)
+	if fn != nil {
+		*ctx.functions = append(*ctx.functions, *fn)
+		ctx.funcNameToID[fn.Name] = fn.ID
+	}
+}
+
+// handleTSVariableDeclarator handles a variable declarator node (arrow/function expressions).
+func (p *TreeSitterParser) handleTSVariableDeclarator(node *sitter.Node, ctx *tsWalkContext) {
+	nameNode := node.ChildByFieldName("name")
+	valueNode := node.ChildByFieldName("value")
+	if nameNode == nil || valueNode == nil {
+		return
+	}
+
+	valueType := valueNode.Type()
+	if valueType != "arrow_function" && valueType != "function_expression" && valueType != "function" {
+		return
+	}
+
+	fn := p.extractJSArrowOrExpressionFunction(nameNode, valueNode, ctx.content, ctx.filePath)
+	if fn != nil {
+		*ctx.functions = append(*ctx.functions, *fn)
+		ctx.funcNameToID[fn.Name] = fn.ID
+	}
+}
+
+// handleTSMethodDef handles a method definition node.
+func (p *TreeSitterParser) handleTSMethodDef(node *sitter.Node, ctx *tsWalkContext) {
+	fn := p.extractJSMethod(node, ctx.content, ctx.filePath)
+	if fn != nil {
+		*ctx.functions = append(*ctx.functions, *fn)
+		ctx.funcNameToID[fn.Name] = fn.ID
+	}
+}
+
+// handleTSMethodSig handles a method signature node (TypeScript interface method).
+func (p *TreeSitterParser) handleTSMethodSig(node *sitter.Node, ctx *tsWalkContext) {
+	fn := p.extractTSMethodSignature(node, ctx.content, ctx.filePath)
+	if fn != nil {
+		*ctx.functions = append(*ctx.functions, *fn)
+		ctx.funcNameToID[fn.Name] = fn.ID
+	}
+}
+
+// handleTSFunctionSig handles a function signature node (TypeScript declaration).
+func (p *TreeSitterParser) handleTSFunctionSig(node *sitter.Node, ctx *tsWalkContext) {
+	fn := p.extractTSFunctionSignature(node, ctx.content, ctx.filePath)
+	if fn != nil {
+		*ctx.functions = append(*ctx.functions, *fn)
+		ctx.funcNameToID[fn.Name] = fn.ID
+	}
+}
+
+// handleTSArrowFunction handles an anonymous arrow function node.
+func (p *TreeSitterParser) handleTSArrowFunction(node *sitter.Node, ctx *tsWalkContext) {
+	parent := node.Parent()
+	if parent != nil && parent.Type() == "variable_declarator" {
+		return // Already handled by variable_declarator case
+	}
+
+	*ctx.anonCounter++
+	fn := p.extractJSAnonymousArrow(node, ctx.content, ctx.filePath, *ctx.anonCounter)
+	if fn != nil {
+		*ctx.functions = append(*ctx.functions, *fn)
 	}
 }
 

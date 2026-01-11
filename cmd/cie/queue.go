@@ -52,7 +52,7 @@ func NewIndexQueue(projectID string) (*IndexQueue, error) {
 	}
 
 	baseDir := filepath.Join(homeDir, ".cie", projectID)
-	if err := os.MkdirAll(baseDir, 0755); err != nil {
+	if err := os.MkdirAll(baseDir, 0750); err != nil {
 		return nil, fmt.Errorf("create queue dir: %w", err)
 	}
 
@@ -67,7 +67,7 @@ func NewIndexQueue(projectID string) (*IndexQueue, error) {
 // TryAcquireLock attempts to acquire the index lock.
 // Returns true if lock was acquired, false if another process holds it.
 func (q *IndexQueue) TryAcquireLock() (bool, error) {
-	f, err := os.OpenFile(q.lockPath, os.O_CREATE|os.O_RDWR, 0644)
+	f, err := os.OpenFile(q.lockPath, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return false, fmt.Errorf("open lock file: %w", err)
 	}
@@ -75,7 +75,7 @@ func (q *IndexQueue) TryAcquireLock() (bool, error) {
 	// Try to acquire exclusive lock (non-blocking)
 	err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 	if err != nil {
-		f.Close()
+		_ = f.Close()
 		if err == syscall.EWOULDBLOCK {
 			return false, nil // Lock is held by another process
 		}
@@ -84,15 +84,15 @@ func (q *IndexQueue) TryAcquireLock() (bool, error) {
 
 	// Write our PID and start time to the lock file
 	if err := f.Truncate(0); err != nil {
-		f.Close()
+		_ = f.Close()
 		return false, fmt.Errorf("truncate lock file: %w", err)
 	}
 	if _, err := f.Seek(0, 0); err != nil {
-		f.Close()
+		_ = f.Close()
 		return false, fmt.Errorf("seek lock file: %w", err)
 	}
 	if _, err := fmt.Fprintf(f, "%d %d\n", os.Getpid(), time.Now().Unix()); err != nil {
-		f.Close()
+		_ = f.Close()
 		return false, fmt.Errorf("write lock file: %w", err)
 	}
 
@@ -124,8 +124,8 @@ func (q *IndexQueue) WaitForLock(timeout time.Duration) (bool, error) {
 // ReleaseLock releases the index lock.
 func (q *IndexQueue) ReleaseLock() {
 	if q.lockFile != nil {
-		syscall.Flock(int(q.lockFile.Fd()), syscall.LOCK_UN)
-		q.lockFile.Close()
+		_ = syscall.Flock(int(q.lockFile.Fd()), syscall.LOCK_UN)
+		_ = q.lockFile.Close()
 		q.lockFile = nil
 	}
 }
@@ -143,7 +143,7 @@ func (q *IndexQueue) GetLockInfo() (*LockInfo, error) {
 	var pid int
 	var timestamp int64
 	if _, err := fmt.Sscanf(string(data), "%d %d", &pid, &timestamp); err != nil {
-		return nil, nil // Invalid format, ignore
+		return nil, fmt.Errorf("parse lock info: %w", err)
 	}
 
 	return &LockInfo{
@@ -172,11 +172,11 @@ func (q *IndexQueue) IsLockStale() bool {
 
 // AddToQueue adds a commit hash to the pending queue.
 func (q *IndexQueue) AddToQueue(commitHash string) error {
-	f, err := os.OpenFile(q.queuePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(q.queuePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		return fmt.Errorf("open queue file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	if _, err := fmt.Fprintln(f, commitHash); err != nil {
 		return fmt.Errorf("write to queue: %w", err)

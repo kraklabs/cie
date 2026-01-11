@@ -226,7 +226,7 @@ func (p *ollamaProvider) Models(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ollama list models: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		Models []struct {
@@ -283,7 +283,7 @@ func (p *ollamaProvider) Generate(ctx context.Context, req GenerateRequest) (*Ge
 	if err != nil {
 		return nil, fmt.Errorf("ollama generate: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
@@ -361,7 +361,7 @@ func (p *ollamaProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	if err != nil {
 		return nil, fmt.Errorf("ollama chat: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
@@ -454,7 +454,7 @@ func (p *openaiProvider) Models(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("openai list models: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		Data []struct {
@@ -543,7 +543,7 @@ func (p *openaiProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	if err != nil {
 		return nil, fmt.Errorf("openai chat: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
@@ -722,7 +722,7 @@ func (p *anthropicProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRes
 	if err != nil {
 		return nil, fmt.Errorf("anthropic chat: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)

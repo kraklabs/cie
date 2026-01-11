@@ -180,7 +180,7 @@ func NewLocalPipeline(config Config, logger *slog.Logger) (*LocalPipeline, error
 
 	// Ensure schema exists
 	if err := backend.EnsureSchema(); err != nil {
-		backend.Close()
+		_ = backend.Close()
 		return nil, fmt.Errorf("ensure schema: %w", err)
 	}
 

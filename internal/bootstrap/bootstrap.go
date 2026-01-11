@@ -107,7 +107,7 @@ func InitProject(config ProjectConfig, logger *slog.Logger) (*ProjectInfo, error
 	if err != nil {
 		return nil, fmt.Errorf("create backend: %w", err)
 	}
-	defer backend.Close()
+	defer func() { _ = backend.Close() }()
 
 	// Ensure schema exists
 	if err := backend.EnsureSchema(); err != nil {

@@ -55,95 +55,76 @@ type GrepMatch struct {
 // Schema v3: code_text is in separate cie_function_code table
 // Supports multiple patterns via 'texts' parameter for batch searches
 func Grep(ctx context.Context, client Querier, args GrepArgs) (*ToolResult, error) {
-	// Handle multi-pattern search
 	if len(args.Texts) > 0 {
 		return grepMulti(ctx, client, args)
 	}
-
 	if args.Text == "" {
 		return NewError("Error: 'text' or 'texts' is required"), nil
 	}
 
-	// Escape for regex but make it literal
-	escapedText := EscapeRegex(args.Text)
-
-	// Build case-insensitive pattern if needed
-	pattern := escapedText
-	if !args.CaseSensitive {
-		pattern = "(?i)" + pattern
-	}
-
-	// Build conditions - include code_text if we need context
 	needsCode := args.ContextLines > 0
-	selectFields := "file_path, name, start_line, end_line"
-	if needsCode {
-		selectFields = "file_path, name, start_line, end_line, code_text"
-	}
-
-	// Build conditions using single-quoted patterns to avoid double-quote escaping issues
-	conditions := []string{fmt.Sprintf("regex_matches(code_text, %s)", QuoteCozoPattern(pattern))}
-
-	// Add path filter if provided (simple substring match)
-	if args.Path != "" {
-		conditions = append(conditions, fmt.Sprintf("regex_matches(file_path, %s)", QuoteCozoPattern(EscapeRegex(args.Path))))
-	}
-
-	// Add exclude pattern if provided (negate the match)
-	if args.ExcludePattern != "" {
-		conditions = append(conditions, fmt.Sprintf("!regex_matches(file_path, %s)", QuoteCozoPattern(args.ExcludePattern)))
-	}
-
-	conditionStr := conditions[0]
-	for i := 1; i < len(conditions); i++ {
-		conditionStr += ", " + conditions[i]
-	}
-
-	// Schema v3: Join with cie_function_code to get code_text
-	script := fmt.Sprintf(
-		"?[%s] := *cie_function { id, file_path, name, start_line, end_line }, *cie_function_code { function_id: id, code_text }, %s :limit %d",
-		selectFields, conditionStr, args.Limit,
-	)
-
+	script := buildGrepQuery(args, needsCode)
 	result, err := client.Query(ctx, script)
 	if err != nil {
 		return nil, err
 	}
 
 	if len(result.Rows) == 0 {
-		output := fmt.Sprintf("No matches found for: `%s`\n", args.Text)
-		if args.Path != "" {
-			output += fmt.Sprintf("In path: `%s`\n", args.Path)
-		}
-		if args.ExcludePattern != "" {
-			output += fmt.Sprintf("Excluding: `%s`\n", args.ExcludePattern)
-		}
-
-		// If searching in a specific path with no results, check if term exists elsewhere
-		if args.Path != "" {
-			altPaths := findAlternativePaths(ctx, client, args.Text, args.CaseSensitive)
-			if len(altPaths) > 0 {
-				output += "\n💡 **Found in other locations:**\n"
-				for _, ap := range altPaths {
-					output += fmt.Sprintf("- `%s` (%d matches)\n", ap.Path, ap.Count)
-				}
-				output += "\n"
-			}
-		}
-
-		// Check for route parameter syntax alternatives
-		routeSuggestions := suggestRouteAlternatives(ctx, client, args.Text, args.Path, args.CaseSensitive)
-		if routeSuggestions != "" {
-			output += routeSuggestions
-		}
-
-		output += "\n**Tips:**\n"
-		output += "- Check spelling and case (default is case-insensitive)\n"
-		output += "- Try a shorter/simpler pattern\n"
-		output += "- Use `cie_list_files` to verify the path exists\n"
-		return NewResult(output), nil
+		return NewResult(formatGrepNoResults(ctx, client, args)), nil
 	}
 
-	output := fmt.Sprintf("Found %d matches for `%s`", len(result.Rows), args.Text)
+	return NewResult(formatGrepResults(result.Rows, args, needsCode)), nil
+}
+
+func buildGrepQuery(args GrepArgs, needsCode bool) string {
+	pattern := EscapeRegex(args.Text)
+	if !args.CaseSensitive {
+		pattern = "(?i)" + pattern
+	}
+
+	selectFields := "file_path, name, start_line, end_line"
+	if needsCode {
+		selectFields += ", code_text"
+	}
+
+	conditions := []string{fmt.Sprintf("regex_matches(code_text, %s)", QuoteCozoPattern(pattern))}
+	if args.Path != "" {
+		conditions = append(conditions, fmt.Sprintf("regex_matches(file_path, %s)", QuoteCozoPattern(EscapeRegex(args.Path))))
+	}
+	if args.ExcludePattern != "" {
+		conditions = append(conditions, fmt.Sprintf("!regex_matches(file_path, %s)", QuoteCozoPattern(args.ExcludePattern)))
+	}
+
+	return fmt.Sprintf(
+		"?[%s] := *cie_function { id, file_path, name, start_line, end_line }, *cie_function_code { function_id: id, code_text }, %s :limit %d",
+		selectFields, strings.Join(conditions, ", "), args.Limit,
+	)
+}
+
+func formatGrepNoResults(ctx context.Context, client Querier, args GrepArgs) string {
+	output := fmt.Sprintf("No matches found for: `%s`\n", args.Text)
+	if args.Path != "" {
+		output += fmt.Sprintf("In path: `%s`\n", args.Path)
+		if altPaths := findAlternativePaths(ctx, client, args.Text, args.CaseSensitive); len(altPaths) > 0 {
+			output += "\n💡 **Found in other locations:**\n"
+			for _, ap := range altPaths {
+				output += fmt.Sprintf("- `%s` (%d matches)\n", ap.Path, ap.Count)
+			}
+			output += "\n"
+		}
+	}
+	if args.ExcludePattern != "" {
+		output += fmt.Sprintf("Excluding: `%s`\n", args.ExcludePattern)
+	}
+	if routeSuggestions := suggestRouteAlternatives(ctx, client, args.Text, args.Path, args.CaseSensitive); routeSuggestions != "" {
+		output += routeSuggestions
+	}
+	output += "\n**Tips:**\n- Check spelling and case (default is case-insensitive)\n- Try a shorter/simpler pattern\n- Use `cie_list_files` to verify the path exists\n"
+	return output
+}
+
+func formatGrepResults(rows [][]any, args GrepArgs, needsCode bool) string {
+	output := fmt.Sprintf("Found %d matches for `%s`", len(rows), args.Text)
 	if args.Path != "" {
 		output += fmt.Sprintf(" in `%s`", args.Path)
 	}
@@ -152,25 +133,16 @@ func Grep(ctx context.Context, client Querier, args GrepArgs) (*ToolResult, erro
 	}
 	output += ":\n\n"
 
-	for i, row := range result.Rows {
-		filePath := AnyToString(row[0])
-		name := AnyToString(row[1])
-		startLine := AnyToString(row[2])
-
-		output += fmt.Sprintf("%d. **%s** in `%s:%s`\n", i+1, name, filePath, startLine)
-
-		// Show context if requested
+	for i, row := range rows {
+		output += fmt.Sprintf("%d. **%s** in `%s:%s`\n", i+1, AnyToString(row[1]), AnyToString(row[0]), AnyToString(row[2]))
 		if needsCode && len(row) > 4 {
-			codeText := AnyToString(row[4])
-			matchContext := extractMatchContext(codeText, args.Text, args.CaseSensitive, args.ContextLines)
-			if matchContext != "" {
+			if matchContext := extractMatchContext(AnyToString(row[4]), args.Text, args.CaseSensitive, args.ContextLines); matchContext != "" {
 				output += "```\n" + matchContext + "```\n"
 			}
 		}
 		output += "\n"
 	}
-
-	return NewResult(output), nil
+	return output
 }
 
 // extractMatchContext finds matching lines and returns them with context
@@ -266,117 +238,111 @@ func grepMulti(ctx context.Context, client Querier, args GrepArgs) (*ToolResult,
 		return NewError("Error: 'texts' array is empty"), nil
 	}
 
-	// Build OR pattern: (pattern1|pattern2|pattern3)
-	var escapedPatterns []string
-	for _, text := range args.Texts {
-		escapedPatterns = append(escapedPatterns, EscapeRegex(text))
-	}
-
-	combinedPattern := "(" + strings.Join(escapedPatterns, "|") + ")"
-	if !args.CaseSensitive {
-		combinedPattern = "(?i)" + combinedPattern
-	}
-
-	// Build conditions
-	conditions := []string{fmt.Sprintf("regex_matches(code_text, %s)", QuoteCozoPattern(combinedPattern))}
-
-	if args.Path != "" {
-		conditions = append(conditions, fmt.Sprintf("regex_matches(file_path, %s)", QuoteCozoPattern(EscapeRegex(args.Path))))
-	}
-
-	if args.ExcludePattern != "" {
-		conditions = append(conditions, fmt.Sprintf("!regex_matches(file_path, %s)", QuoteCozoPattern(args.ExcludePattern)))
-	}
-
-	conditionStr := strings.Join(conditions, ", ")
-
-	// Query with code_text to count per-pattern matches
-	script := fmt.Sprintf(
-		"?[file_path, name, start_line, code_text] := *cie_function { id, file_path, name, start_line }, *cie_function_code { function_id: id, code_text }, %s :limit %d",
-		conditionStr, args.Limit*len(args.Texts), // Get more results since we're grouping
-	)
-
+	script := buildGrepMultiQuery(args)
 	result, err := client.Query(ctx, script)
 	if err != nil {
 		return nil, err
 	}
 
-	// Group results by pattern
+	patternCounts, patternMatches := groupGrepMultiResults(result.Rows, args)
+	return NewResult(formatGrepMultiOutput(args, patternCounts, patternMatches)), nil
+}
+
+func buildGrepMultiQuery(args GrepArgs) string {
+	var escapedPatterns []string
+	for _, text := range args.Texts {
+		escapedPatterns = append(escapedPatterns, EscapeRegex(text))
+	}
+	combinedPattern := "(" + strings.Join(escapedPatterns, "|") + ")"
+	if !args.CaseSensitive {
+		combinedPattern = "(?i)" + combinedPattern
+	}
+
+	conditions := []string{fmt.Sprintf("regex_matches(code_text, %s)", QuoteCozoPattern(combinedPattern))}
+	if args.Path != "" {
+		conditions = append(conditions, fmt.Sprintf("regex_matches(file_path, %s)", QuoteCozoPattern(EscapeRegex(args.Path))))
+	}
+	if args.ExcludePattern != "" {
+		conditions = append(conditions, fmt.Sprintf("!regex_matches(file_path, %s)", QuoteCozoPattern(args.ExcludePattern)))
+	}
+
+	return fmt.Sprintf(
+		"?[file_path, name, start_line, code_text] := *cie_function { id, file_path, name, start_line }, *cie_function_code { function_id: id, code_text }, %s :limit %d",
+		strings.Join(conditions, ", "), args.Limit*len(args.Texts),
+	)
+}
+
+func groupGrepMultiResults(rows [][]any, args GrepArgs) (map[string]int, map[string][]GrepMatch) {
 	patternCounts := make(map[string]int)
 	patternMatches := make(map[string][]GrepMatch)
 
-	for _, row := range result.Rows {
-		filePath := AnyToString(row[0])
-		name := AnyToString(row[1])
-		startLine := AnyToString(row[2])
+	for _, row := range rows {
 		codeText := AnyToString(row[3])
-
-		// Check which patterns match this result
 		for _, text := range args.Texts {
-			checkText := text
-			checkCode := codeText
-			if !args.CaseSensitive {
-				checkText = ToLower(text)
-				checkCode = ToLower(codeText)
-			}
-
-			if ContainsStr(checkCode, checkText) {
+			if matchesGrepPattern(codeText, text, args.CaseSensitive) {
 				patternCounts[text]++
 				if len(patternMatches[text]) < args.Limit {
 					patternMatches[text] = append(patternMatches[text], GrepMatch{
-						FilePath:  filePath,
-						Name:      name,
-						StartLine: startLine,
+						FilePath: AnyToString(row[0]), Name: AnyToString(row[1]), StartLine: AnyToString(row[2]),
 					})
 				}
 			}
 		}
 	}
+	return patternCounts, patternMatches
+}
 
-	// Build output
+func matchesGrepPattern(code, text string, caseSensitive bool) bool {
+	if !caseSensitive {
+		return ContainsStr(ToLower(code), ToLower(text))
+	}
+	return ContainsStr(code, text)
+}
+
+func formatGrepMultiOutput(args GrepArgs, patternCounts map[string]int, patternMatches map[string][]GrepMatch) string {
 	var output strings.Builder
 	output.WriteString(fmt.Sprintf("## Multi-pattern search (%d patterns)\n\n", len(args.Texts)))
-
 	if args.Path != "" {
 		output.WriteString(fmt.Sprintf("Path filter: `%s`\n\n", args.Path))
 	}
 
-	// Summary table
-	output.WriteString("| Pattern | Matches |\n")
-	output.WriteString("|---------|--------:|\n")
+	formatGrepMultiSummary(&output, args.Texts, patternCounts)
+	formatGrepMultiDetails(&output, args.Texts, patternCounts, patternMatches)
 
+	return output.String()
+}
+
+func formatGrepMultiSummary(output *strings.Builder, texts []string, patternCounts map[string]int) {
+	output.WriteString("| Pattern | Matches |\n|---------|--------:|\n")
 	totalMatches := 0
-	for _, text := range args.Texts {
+	for _, text := range texts {
 		count := patternCounts[text]
 		totalMatches += count
 		status := "✓"
 		if count == 0 {
 			status = "✗"
 		}
-		output.WriteString(fmt.Sprintf("| `%s` | %s %d |\n", text, status, count))
+		_, _ = fmt.Fprintf(output, "| `%s` | %s %d |\n", text, status, count)
 	}
-	output.WriteString(fmt.Sprintf("| **Total** | **%d** |\n\n", totalMatches))
+	_, _ = fmt.Fprintf(output, "| **Total** | **%d** |\n\n", totalMatches)
+}
 
-	// Detailed matches per pattern
-	for _, text := range args.Texts {
+func formatGrepMultiDetails(output *strings.Builder, texts []string, patternCounts map[string]int, patternMatches map[string][]GrepMatch) {
+	for _, text := range texts {
 		matches := patternMatches[text]
 		if len(matches) == 0 {
 			continue
 		}
-
-		output.WriteString(fmt.Sprintf("### `%s` (%d matches)\n\n", text, patternCounts[text]))
-
+		_, _ = fmt.Fprintf(output, "### `%s` (%d matches)\n\n", text, patternCounts[text])
 		for i, match := range matches {
-			if i >= 5 { // Limit detail per pattern
-				output.WriteString(fmt.Sprintf("  ... and %d more\n", len(matches)-5))
+			if i >= 5 {
+				_, _ = fmt.Fprintf(output, "  ... and %d more\n", len(matches)-5)
 				break
 			}
-			output.WriteString(fmt.Sprintf("- **%s** in `%s:%s`\n", match.Name, match.FilePath, match.StartLine))
+			_, _ = fmt.Fprintf(output, "- **%s** in `%s:%s`\n", match.Name, match.FilePath, match.StartLine)
 		}
 		output.WriteString("\n")
 	}
-
-	return NewResult(output.String()), nil
 }
 
 // altPath represents an alternative path where a search term was found
@@ -623,97 +589,88 @@ func VerifyAbsence(ctx context.Context, client Querier, args VerifyAbsenceArgs) 
 	if len(args.Patterns) == 0 {
 		return NewError("Error: 'patterns' array is required"), nil
 	}
-
 	if args.Severity == "" {
 		args.Severity = "warning"
 	}
 
-	// Build OR pattern for all patterns
+	result, err := client.Query(ctx, buildAbsenceQuery(args))
+	if err != nil {
+		return nil, err
+	}
+
+	filesScanned := countAbsenceFiles(ctx, client, args.Path)
+	violations := findAbsenceViolations(result.Rows, args)
+
+	return NewResult(formatAbsenceResult(args, violations, filesScanned)), nil
+}
+
+func buildAbsenceQuery(args VerifyAbsenceArgs) string {
 	var escapedPatterns []string
 	for _, pattern := range args.Patterns {
 		escapedPatterns = append(escapedPatterns, EscapeRegex(pattern))
 	}
-
 	combinedPattern := "(" + strings.Join(escapedPatterns, "|") + ")"
 	if !args.CaseSensitive {
 		combinedPattern = "(?i)" + combinedPattern
 	}
 
-	// Build conditions
 	conditions := []string{fmt.Sprintf("regex_matches(code_text, %s)", QuoteCozoPattern(combinedPattern))}
-
 	if args.Path != "" {
 		conditions = append(conditions, fmt.Sprintf("regex_matches(file_path, %s)", QuoteCozoPattern(EscapeRegex(args.Path))))
 	}
-
 	if args.ExcludePattern != "" {
 		conditions = append(conditions, fmt.Sprintf("!regex_matches(file_path, %s)", QuoteCozoPattern(args.ExcludePattern)))
 	}
-
-	conditionStr := strings.Join(conditions, ", ")
-
-	// Query for violations
-	script := fmt.Sprintf(
+	return fmt.Sprintf(
 		"?[file_path, name, start_line, code_text] := *cie_function { id, file_path, name, start_line }, *cie_function_code { function_id: id, code_text }, %s :limit 100",
-		conditionStr,
+		strings.Join(conditions, ", "),
 	)
+}
 
+func countAbsenceFiles(ctx context.Context, client Querier, path string) int {
+	script := "?[count(file_path)] := *cie_file { file_path }"
+	if path != "" {
+		script = fmt.Sprintf("?[count(file_path)] := *cie_file { file_path }, regex_matches(file_path, %s)", QuoteCozoPattern(EscapeRegex(path)))
+	}
 	result, err := client.Query(ctx, script)
-	if err != nil {
-		return nil, err
-	}
-
-	// Also count total files for context
-	fileCountScript := "?[count(file_path)] := *cie_file { file_path }"
-	if args.Path != "" {
-		fileCountScript = fmt.Sprintf(
-			"?[count(file_path)] := *cie_file { file_path }, regex_matches(file_path, %s)",
-			QuoteCozoPattern(EscapeRegex(args.Path)),
-		)
-	}
-	fileCountResult, err := client.Query(ctx, fileCountScript)
-	filesScanned := 0
-	if err == nil && fileCountResult != nil && len(fileCountResult.Rows) > 0 && len(fileCountResult.Rows[0]) > 0 {
-		if v, ok := fileCountResult.Rows[0][0].(float64); ok {
-			filesScanned = int(v)
+	if err == nil && result != nil && len(result.Rows) > 0 && len(result.Rows[0]) > 0 {
+		if v, ok := result.Rows[0][0].(float64); ok {
+			return int(v)
 		}
 	}
+	return 0
+}
 
-	// Collect violations grouped by pattern
+func findAbsenceViolations(rows [][]any, args VerifyAbsenceArgs) []AbsenceViolation {
 	var violations []AbsenceViolation
-
-	for _, row := range result.Rows {
-		filePath := AnyToString(row[0])
-		name := AnyToString(row[1])
-		startLine := AnyToString(row[2])
+	for _, row := range rows {
 		codeText := AnyToString(row[3])
-
-		// Find which pattern matched
 		for _, pattern := range args.Patterns {
-			checkPattern := pattern
-			checkCode := codeText
-			if !args.CaseSensitive {
-				checkPattern = ToLower(pattern)
-				checkCode = ToLower(codeText)
-			}
-
-			if ContainsStr(checkCode, checkPattern) {
+			if matchesAbsencePattern(codeText, pattern, args.CaseSensitive) {
 				violations = append(violations, AbsenceViolation{
 					Pattern:  pattern,
-					FilePath: filePath,
-					Function: name,
-					Line:     startLine,
+					FilePath: AnyToString(row[0]),
+					Function: AnyToString(row[1]),
+					Line:     AnyToString(row[2]),
 					Severity: args.Severity,
 				})
-				break // Only count once per function even if multiple patterns match
+				break
 			}
 		}
 	}
+	return violations
+}
 
-	passed := len(violations) == 0
+func matchesAbsencePattern(code, pattern string, caseSensitive bool) bool {
+	if !caseSensitive {
+		return ContainsStr(ToLower(code), ToLower(pattern))
+	}
+	return ContainsStr(code, pattern)
+}
 
-	// Build output
+func formatAbsenceResult(args VerifyAbsenceArgs, violations []AbsenceViolation, filesScanned int) string {
 	var output strings.Builder
+	passed := len(violations) == 0
 
 	if passed {
 		output.WriteString("## ✅ Verification PASSED\n\n")
@@ -723,7 +680,6 @@ func VerifyAbsence(ctx context.Context, client Querier, args VerifyAbsenceArgs) 
 		output.WriteString(fmt.Sprintf("Found %d violation(s) across %d pattern(s).\n\n", len(violations), len(args.Patterns)))
 	}
 
-	// Summary
 	output.WriteString("### Summary\n\n")
 	output.WriteString(fmt.Sprintf("- **Patterns checked:** %d\n", len(args.Patterns)))
 	output.WriteString(fmt.Sprintf("- **Violations found:** %d\n", len(violations)))
@@ -733,9 +689,15 @@ func VerifyAbsence(ctx context.Context, client Querier, args VerifyAbsenceArgs) 
 	}
 	output.WriteString("\n")
 
-	// Patterns checked
+	formatAbsencePatternStatus(&output, args.Patterns, violations)
+	formatAbsenceViolations(&output, violations)
+
+	return output.String()
+}
+
+func formatAbsencePatternStatus(output *strings.Builder, patterns []string, violations []AbsenceViolation) {
 	output.WriteString("### Patterns\n\n")
-	for _, pattern := range args.Patterns {
+	for _, pattern := range patterns {
 		found := false
 		for _, v := range violations {
 			if v.Pattern == pattern {
@@ -744,26 +706,26 @@ func VerifyAbsence(ctx context.Context, client Querier, args VerifyAbsenceArgs) 
 			}
 		}
 		if found {
-			output.WriteString(fmt.Sprintf("- ❌ `%s`\n", pattern))
+			_, _ = fmt.Fprintf(output, "- ❌ `%s`\n", pattern)
 		} else {
-			output.WriteString(fmt.Sprintf("- ✅ `%s`\n", pattern))
+			_, _ = fmt.Fprintf(output, "- ✅ `%s`\n", pattern)
 		}
 	}
 	output.WriteString("\n")
+}
 
-	// Violations detail
-	if len(violations) > 0 {
-		output.WriteString("### Violations\n\n")
-		for i, v := range violations {
-			if i >= 10 {
-				output.WriteString(fmt.Sprintf("\n... and %d more violations\n", len(violations)-10))
-				break
-			}
-			output.WriteString(fmt.Sprintf("**%d. `%s`** found in:\n", i+1, v.Pattern))
-			output.WriteString(fmt.Sprintf("   - Function: `%s`\n", v.Function))
-			output.WriteString(fmt.Sprintf("   - File: `%s:%s`\n\n", v.FilePath, v.Line))
-		}
+func formatAbsenceViolations(output *strings.Builder, violations []AbsenceViolation) {
+	if len(violations) == 0 {
+		return
 	}
-
-	return NewResult(output.String()), nil
+	output.WriteString("### Violations\n\n")
+	for i, v := range violations {
+		if i >= 10 {
+			_, _ = fmt.Fprintf(output, "\n... and %d more violations\n", len(violations)-10)
+			break
+		}
+		_, _ = fmt.Fprintf(output, "**%d. `%s`** found in:\n", i+1, v.Pattern)
+		_, _ = fmt.Fprintf(output, "   - Function: `%s`\n", v.Function)
+		_, _ = fmt.Fprintf(output, "   - File: `%s:%s`\n\n", v.FilePath, v.Line)
+	}
 }

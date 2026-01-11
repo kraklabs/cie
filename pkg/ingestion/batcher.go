@@ -115,89 +115,101 @@ func (b *Batcher) Batch(script string) ([]string, error) {
 	return batches, nil
 }
 
+// statementParser tracks parsing state for Datalog statement splitting.
+type statementParser struct {
+	braceDepth, bracketDepth int
+	inString                 bool
+	stringChar               rune
+	escapeNext               bool
+}
+
 // splitStatements splits a Datalog script into individual mutation statements.
 // Handles CozoDB's batch syntax where each query is wrapped in { }.
-// See: https://docs.cozodb.org/en/latest/stored.html
 func (b *Batcher) splitStatements(script string) []string {
 	var statements []string
 	var current strings.Builder
+	parser := &statementParser{}
 
-	lines := strings.Split(script, "\n")
-	braceDepth := 0
-	bracketDepth := 0
-	inString := false
-	stringChar := rune(0) // Use rune to properly handle Unicode
-	escapeNext := false
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-
-		// Skip empty lines and comments
-		if trimmed == "" || strings.HasPrefix(trimmed, "//") {
+	for _, line := range strings.Split(script, "\n") {
+		if trimmed := strings.TrimSpace(line); trimmed == "" || strings.HasPrefix(trimmed, "//") {
 			continue
 		}
 
-		// Track depth of braces, brackets, and strings
-		// NOTE: We use rune comparison directly, not byte, to avoid
-		// false matches with Unicode characters like Ч (U+0427) which
-		// would truncate to 0x27 (single quote) when cast to byte.
-		for _, char := range line {
-			// Handle escape sequences
-			if escapeNext {
-				escapeNext = false
-				continue
-			}
+		parser.processLine(line)
 
-			// Handle string literals (only ASCII quotes)
-			if !inString && (char == '"' || char == '\'') {
-				inString = true
-				stringChar = char
-			} else if inString && char == stringChar {
-				inString = false
-				stringChar = 0
-			} else if char == '\\' {
-				escapeNext = true
-				continue
-			}
-
-			// Count braces and brackets only outside strings (ASCII only)
-			if !inString {
-				switch char {
-				case '{':
-					braceDepth++
-				case '}':
-					braceDepth--
-				case '[':
-					bracketDepth++
-				case ']':
-					bracketDepth--
-				}
-			}
-		}
-
-		// Add line to current statement
 		if current.Len() > 0 {
 			current.WriteString("\n")
 		}
 		current.WriteString(line)
 
-		// Statement is complete when all braces are closed
-		if braceDepth == 0 && bracketDepth == 0 && !inString && current.Len() > 0 {
-			stmt := strings.TrimSpace(current.String())
-			if stmt != "" && stmt != "//" && !strings.HasPrefix(stmt, "//") {
+		if parser.isStatementComplete() && current.Len() > 0 {
+			if stmt := extractValidStatement(current.String()); stmt != "" {
 				statements = append(statements, stmt)
 			}
 			current.Reset()
 		}
 	}
 
-	// Add any remaining statement
-	if current.Len() > 0 {
-		stmt := strings.TrimSpace(current.String())
-		if stmt != "" && stmt != "//" && !strings.HasPrefix(stmt, "//") {
-			statements = append(statements, stmt)
-		}
+	if stmt := extractValidStatement(current.String()); stmt != "" {
+		statements = append(statements, stmt)
+	}
+	return statements
+}
+
+func (p *statementParser) processLine(line string) {
+	for _, char := range line {
+		p.processChar(char)
+	}
+}
+
+func (p *statementParser) processChar(char rune) {
+	if p.escapeNext {
+		p.escapeNext = false
+		return
 	}
 
-	return statements
+	if char == '\\' {
+		p.escapeNext = true
+		return
+	}
+
+	p.handleStringState(char)
+	if !p.inString {
+		p.updateBracketDepth(char)
+	}
+}
+
+func (p *statementParser) handleStringState(char rune) {
+	if !p.inString && (char == '"' || char == '\'') {
+		p.inString = true
+		p.stringChar = char
+	} else if p.inString && char == p.stringChar {
+		p.inString = false
+		p.stringChar = 0
+	}
+}
+
+func (p *statementParser) updateBracketDepth(char rune) {
+	switch char {
+	case '{':
+		p.braceDepth++
+	case '}':
+		p.braceDepth--
+	case '[':
+		p.bracketDepth++
+	case ']':
+		p.bracketDepth--
+	}
+}
+
+func (p *statementParser) isStatementComplete() bool {
+	return p.braceDepth == 0 && p.bracketDepth == 0 && !p.inString
+}
+
+func extractValidStatement(s string) string {
+	stmt := strings.TrimSpace(s)
+	if stmt == "" || stmt == "//" || strings.HasPrefix(stmt, "//") {
+		return ""
+	}
+	return stmt
 }

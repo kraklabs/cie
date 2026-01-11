@@ -122,7 +122,7 @@ func findGitDir() (string, error) {
 				return gitPath, nil
 			}
 			// .git is a file (worktree), read its contents
-			content, err := os.ReadFile(gitPath)
+			content, err := os.ReadFile(gitPath) //nolint:gosec // G304: gitPath is constructed from CWD
 			if err != nil {
 				return "", fmt.Errorf("cannot read .git file: %w", err)
 			}
@@ -160,7 +160,7 @@ func findGitDir() (string, error) {
 func installHook(hookPath string, force bool) error {
 	// Check if hooks directory exists
 	hookDir := filepath.Dir(hookPath)
-	if err := os.MkdirAll(hookDir, 0755); err != nil {
+	if err := os.MkdirAll(hookDir, 0750); err != nil {
 		return fmt.Errorf("cannot create hooks directory: %w", err)
 	}
 
@@ -168,7 +168,7 @@ func installHook(hookPath string, force bool) error {
 	if _, err := os.Stat(hookPath); err == nil {
 		if !force {
 			// Check if it's our hook
-			content, err := os.ReadFile(hookPath)
+			content, err := os.ReadFile(hookPath) //nolint:gosec // G304: hookPath from user's git repo
 			if err == nil && containsCIEMarker(string(content)) {
 				fmt.Println("CIE hook already installed. Use --force to reinstall.")
 				return nil
@@ -177,8 +177,8 @@ func installHook(hookPath string, force bool) error {
 		}
 	}
 
-	// Write the hook
-	if err := os.WriteFile(hookPath, []byte(postCommitHookContent), 0755); err != nil {
+	// Write the hook (needs exec permission)
+	if err := os.WriteFile(hookPath, []byte(postCommitHookContent), 0750); err != nil { //nolint:gosec // G306: Hook needs exec permission
 		return fmt.Errorf("cannot write hook: %w", err)
 	}
 
@@ -197,7 +197,7 @@ func installHook(hookPath string, force bool) error {
 // is not a CIE hook (protection against accidental removal).
 func removeHook(hookPath string) error {
 	// Check if hook exists
-	content, err := os.ReadFile(hookPath)
+	content, err := os.ReadFile(hookPath) //nolint:gosec // G304: hookPath from user's git repo
 	if err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("no hook found at %s", hookPath)
@@ -247,7 +247,7 @@ func IsHookInstalled() bool {
 	}
 
 	hookPath := filepath.Join(gitDir, "hooks", "post-commit")
-	content, err := os.ReadFile(hookPath)
+	content, err := os.ReadFile(hookPath) //nolint:gosec // G304: hookPath from git dir discovery
 	if err != nil {
 		return false
 	}
