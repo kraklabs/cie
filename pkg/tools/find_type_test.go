@@ -123,3 +123,5 @@ func TestTypeInfo_Struct(t *testing.T) {
 		t.Error("CodeText not set correctly")
 	}
 }
+
+// Integration tests below - these require CozoDB and use the cozodb build tag
