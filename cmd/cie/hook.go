@@ -24,6 +24,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/kraklabs/cie/internal/errors"
 )
 
 const postCommitHookContent = `#!/bin/sh
@@ -79,24 +81,21 @@ Options:
 	// Find git directory
 	gitDir, err := findGitDir()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		errors.FatalError(err, false) // findGitDir returns UserError
 	}
 
 	hookPath := filepath.Join(gitDir, "hooks", "post-commit")
 
 	if *remove {
 		if err := removeHook(hookPath); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			errors.FatalError(err, false) // removeHook returns UserError
 		}
 		fmt.Println("Git hook removed successfully.")
 		return
 	}
 
 	if err := installHook(hookPath, *force); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		errors.FatalError(err, false) // installHook returns UserError
 	}
 	fmt.Printf("Git hook installed: %s\n", hookPath)
 }
@@ -110,7 +109,12 @@ Options:
 func findGitDir() (string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return "", err
+		return "", errors.NewInternalError(
+			"Cannot access working directory",
+			"Failed to determine current directory path",
+			"Check system permissions and try again",
+			err,
+		)
 	}
 
 	// Walk up the directory tree looking for .git
@@ -124,7 +128,12 @@ func findGitDir() (string, error) {
 			// .git is a file (worktree), read its contents
 			content, err := os.ReadFile(gitPath) //nolint:gosec // G304: gitPath is constructed from CWD
 			if err != nil {
-				return "", fmt.Errorf("cannot read .git file: %w", err)
+				return "", errors.NewPermissionError(
+					"Cannot read git worktree file",
+					fmt.Sprintf("Permission denied reading %s", gitPath),
+					"Check file permissions in your git repository",
+					err,
+				)
 			}
 			// Parse "gitdir: <path>"
 			var gitdir string
@@ -143,7 +152,11 @@ func findGitDir() (string, error) {
 		dir = parent
 	}
 
-	return "", fmt.Errorf("not a git repository (or any of the parent directories)")
+	return "", errors.NewNotFoundError(
+		"Git repository not found",
+		fmt.Sprintf("Searched from %s to filesystem root, no .git directory found", cwd),
+		"Initialize a git repository with 'git init' or run this command in a git-managed directory",
+	)
 }
 
 // installHook writes the CIE post-commit hook to the specified path.
@@ -161,7 +174,12 @@ func installHook(hookPath string, force bool) error {
 	// Check if hooks directory exists
 	hookDir := filepath.Dir(hookPath)
 	if err := os.MkdirAll(hookDir, 0750); err != nil {
-		return fmt.Errorf("cannot create hooks directory: %w", err)
+		return errors.NewPermissionError(
+			"Cannot create hooks directory",
+			fmt.Sprintf("Permission denied creating %s", hookDir),
+			"Check .git/hooks/ directory permissions",
+			err,
+		)
 	}
 
 	// Check if hook already exists
@@ -173,13 +191,22 @@ func installHook(hookPath string, force bool) error {
 				fmt.Println("CIE hook already installed. Use --force to reinstall.")
 				return nil
 			}
-			return fmt.Errorf("hook already exists at %s\nUse --force to overwrite", hookPath)
+			return errors.NewInputError(
+				"Hook already exists",
+				fmt.Sprintf("A post-commit hook already exists at %s", hookPath),
+				"Use 'cie install-hook --force' to overwrite the existing hook, or manually edit it",
+			)
 		}
 	}
 
 	// Write the hook (needs exec permission)
 	if err := os.WriteFile(hookPath, []byte(postCommitHookContent), 0750); err != nil { //nolint:gosec // G306: Hook needs exec permission
-		return fmt.Errorf("cannot write hook: %w", err)
+		return errors.NewPermissionError(
+			"Cannot write hook file",
+			fmt.Sprintf("Permission denied writing to %s", hookPath),
+			"Check file permissions in .git/hooks/ directory",
+			err,
+		)
 	}
 
 	return nil
@@ -200,19 +227,37 @@ func removeHook(hookPath string) error {
 	content, err := os.ReadFile(hookPath) //nolint:gosec // G304: hookPath from user's git repo
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("no hook found at %s", hookPath)
+			return errors.NewNotFoundError(
+				"Hook not found",
+				fmt.Sprintf("No post-commit hook exists at %s", hookPath),
+				"Run 'cie install-hook' to install the CIE hook first",
+			)
 		}
-		return fmt.Errorf("cannot read hook: %w", err)
+		return errors.NewPermissionError(
+			"Cannot read hook file",
+			fmt.Sprintf("Permission denied reading %s", hookPath),
+			"Check file permissions in .git/hooks/ directory",
+			err,
+		)
 	}
 
 	// Check if it's our hook
 	if !containsCIEMarker(string(content)) {
-		return fmt.Errorf("hook at %s was not installed by CIE\nManually remove it if needed", hookPath)
+		return errors.NewInputError(
+			"Hook not installed by CIE",
+			fmt.Sprintf("The hook at %s was not installed by CIE", hookPath),
+			"Manually remove the hook file if you want to delete it, or use --force when installing",
+		)
 	}
 
 	// Remove the hook
 	if err := os.Remove(hookPath); err != nil {
-		return fmt.Errorf("cannot remove hook: %w", err)
+		return errors.NewPermissionError(
+			"Cannot remove hook file",
+			fmt.Sprintf("Permission denied deleting %s", hookPath),
+			"Check file permissions in .git/hooks/ directory",
+			err,
+		)
 	}
 
 	return nil

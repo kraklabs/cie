@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/kraklabs/cie/internal/errors"
 	"github.com/kraklabs/cie/pkg/storage"
 )
 
@@ -79,32 +80,18 @@ Options:
 	// Load configuration
 	cfg, err := LoadConfig(configPath)
 	if err != nil {
-		if *jsonOutput {
-			outputStatusJSON(&StatusResult{
-				Connected: false,
-				Error:     err.Error(),
-				Timestamp: time.Now(),
-			})
-		} else {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		}
-		os.Exit(1)
+		errors.FatalError(err, *jsonOutput) // LoadConfig returns UserError
 	}
 
 	// Determine data directory
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		if *jsonOutput {
-			outputStatusJSON(&StatusResult{
-				ProjectID: cfg.ProjectID,
-				Connected: false,
-				Error:     err.Error(),
-				Timestamp: time.Now(),
-			})
-		} else {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		}
-		os.Exit(1)
+		errors.FatalError(errors.NewInternalError(
+			"Cannot determine home directory",
+			"Operating system failed to provide user home directory path",
+			"Check your system configuration or set the HOME environment variable",
+			err,
+		), *jsonOutput)
 	}
 	dataDir := filepath.Join(homeDir, ".cie", "data", cfg.ProjectID)
 
@@ -134,14 +121,12 @@ Options:
 		ProjectID: cfg.ProjectID,
 	})
 	if err != nil {
-		result.Connected = false
-		result.Error = fmt.Sprintf("Cannot open database: %v", err)
-		if *jsonOutput {
-			outputStatusJSON(result)
-		} else {
-			fmt.Fprintf(os.Stderr, "Error: cannot open database: %v\n", err)
-		}
-		os.Exit(1)
+		errors.FatalError(errors.NewDatabaseError(
+			"Cannot open CIE database",
+			"The database file may be corrupted, locked by another process, or permission denied",
+			"Try running 'cie status' again, or run 'cie reset --yes' to rebuild the index",
+			err,
+		), *jsonOutput)
 	}
 	defer func() { _ = backend.Close() }()
 

@@ -26,6 +26,8 @@ import (
 	"strconv"
 	"syscall"
 	"time"
+
+	"github.com/kraklabs/cie/internal/errors"
 )
 
 // IndexQueue manages the lock file and commit queue for index operations.
@@ -48,12 +50,22 @@ type LockInfo struct {
 func NewIndexQueue(projectID string) (*IndexQueue, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return nil, fmt.Errorf("get home dir: %w", err)
+		return nil, errors.NewInternalError(
+			"Cannot determine home directory",
+			"Operating system failed to provide user home directory path",
+			"Check your system configuration or set the HOME environment variable",
+			err,
+		)
 	}
 
 	baseDir := filepath.Join(homeDir, ".cie", projectID)
 	if err := os.MkdirAll(baseDir, 0750); err != nil {
-		return nil, fmt.Errorf("create queue dir: %w", err)
+		return nil, errors.NewPermissionError(
+			"Cannot create queue directory",
+			fmt.Sprintf("Permission denied creating %s", baseDir),
+			"Check directory permissions or run with appropriate privileges",
+			err,
+		)
 	}
 
 	return &IndexQueue{
@@ -69,7 +81,12 @@ func NewIndexQueue(projectID string) (*IndexQueue, error) {
 func (q *IndexQueue) TryAcquireLock() (bool, error) {
 	f, err := os.OpenFile(q.lockPath, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
-		return false, fmt.Errorf("open lock file: %w", err)
+		return false, errors.NewPermissionError(
+			"Cannot open lock file",
+			fmt.Sprintf("Permission denied accessing %s", q.lockPath),
+			"Check file permissions in the .cie directory",
+			err,
+		)
 	}
 
 	// Try to acquire exclusive lock (non-blocking)
@@ -79,21 +96,41 @@ func (q *IndexQueue) TryAcquireLock() (bool, error) {
 		if err == syscall.EWOULDBLOCK {
 			return false, nil // Lock is held by another process
 		}
-		return false, fmt.Errorf("flock: %w", err)
+		return false, errors.NewDatabaseError(
+			"Cannot acquire index lock",
+			"File locking operation failed",
+			"Ensure no corrupted lock files exist and try again",
+			err,
+		)
 	}
 
 	// Write our PID and start time to the lock file
 	if err := f.Truncate(0); err != nil {
 		_ = f.Close()
-		return false, fmt.Errorf("truncate lock file: %w", err)
+		return false, errors.NewDatabaseError(
+			"Cannot update lock file",
+			"Failed to truncate lock file",
+			"Check file permissions and disk space",
+			err,
+		)
 	}
 	if _, err := f.Seek(0, 0); err != nil {
 		_ = f.Close()
-		return false, fmt.Errorf("seek lock file: %w", err)
+		return false, errors.NewDatabaseError(
+			"Cannot update lock file",
+			"Failed to seek in lock file",
+			"This is unexpected - try removing the lock file manually",
+			err,
+		)
 	}
 	if _, err := fmt.Fprintf(f, "%d %d\n", os.Getpid(), time.Now().Unix()); err != nil {
 		_ = f.Close()
-		return false, fmt.Errorf("write lock file: %w", err)
+		return false, errors.NewPermissionError(
+			"Cannot write to lock file",
+			"Permission denied writing lock information",
+			"Check file permissions and disk space",
+			err,
+		)
 	}
 
 	q.lockFile = f

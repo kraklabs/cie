@@ -26,6 +26,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/kraklabs/cie/internal/errors"
 )
 
 // runInit executes the 'init' CLI command, creating a .cie/project.yaml configuration file.
@@ -69,14 +71,21 @@ func runInit(args []string) {
 
 	cwd, err := os.Getwd()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: cannot get current directory: %v\n", err)
-		os.Exit(1)
+		errors.FatalError(errors.NewInternalError(
+			"Cannot access working directory",
+			"Failed to determine current directory path",
+			"This is unexpected. Please report this issue if it persists",
+			err,
+		), false)
 	}
 
 	configPath := ConfigPath(cwd)
 	if _, err := os.Stat(configPath); err == nil && !flags.force {
-		fmt.Fprintf(os.Stderr, "Error: %s already exists. Use --force to overwrite.\n", configPath)
-		os.Exit(1)
+		errors.FatalError(errors.NewInputError(
+			"Configuration already exists",
+			fmt.Sprintf("%s already exists in this directory", configPath),
+			"Use 'cie init --force' to overwrite the existing configuration",
+		), false)
 	}
 
 	cfg := createInitConfig(cwd, flags)
@@ -213,12 +222,20 @@ func promptLLMConfig(reader *bufio.Reader, cfg *Config) {
 func saveInitConfig(cwd, configPath string, cfg *Config) {
 	cieDir := ConfigDir(cwd)
 	if err := os.MkdirAll(cieDir, 0750); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: cannot create .cie directory: %v\n", err)
-		os.Exit(1)
+		errors.FatalError(errors.NewPermissionError(
+			"Cannot create .cie directory",
+			fmt.Sprintf("Permission denied creating directory: %s", cieDir),
+			"Check directory permissions or run with appropriate privileges",
+			err,
+		), false)
 	}
 	if err := SaveConfig(cfg, configPath); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: cannot save configuration: %v\n", err)
-		os.Exit(1)
+		errors.FatalError(errors.NewPermissionError(
+			"Cannot save configuration file",
+			fmt.Sprintf("Failed to write %s", configPath),
+			"Check directory permissions and available disk space",
+			err,
+		), false)
 	}
 	fmt.Printf("Created %s\n", configPath)
 	addToGitignore(cwd)

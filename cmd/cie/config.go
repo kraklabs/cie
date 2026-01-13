@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/kraklabs/cie/internal/errors"
 	"gopkg.in/yaml.v3"
 )
 
@@ -160,23 +161,38 @@ func LoadConfig(configPath string) (*Config, error) {
 		var err error
 		configPath, err = findConfigFile()
 		if err != nil {
-			return nil, fmt.Errorf("find config file: %w", err)
+			return nil, err // findConfigFile returns UserError
 		}
 	}
 
 	data, err := os.ReadFile(configPath) //nolint:gosec // G304: Path comes from user config or discovery
 	if err != nil {
-		return nil, fmt.Errorf("read config file: %w", err)
+		return nil, errors.NewConfigError(
+			"Cannot read configuration file",
+			fmt.Sprintf("Failed to read %s", configPath),
+			"Check file permissions and ensure the file exists",
+			err,
+		)
 	}
 
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parse config file: %w", err)
+		return nil, errors.NewConfigError(
+			"Invalid configuration format",
+			"YAML parsing failed - the config file contains syntax errors",
+			fmt.Sprintf("Edit %s to fix syntax errors, or run 'cie init --force' to recreate", configPath),
+			err,
+		)
 	}
 
 	// Validate version
 	if cfg.Version != configVersion {
-		return nil, fmt.Errorf("unsupported config version: %s (expected %s)", cfg.Version, configVersion)
+		return nil, errors.NewConfigError(
+			"Unsupported configuration version",
+			fmt.Sprintf("Config version '%s' is not supported (expected '%s')", cfg.Version, configVersion),
+			"Run 'cie init --force' to regenerate the configuration file",
+			nil,
+		)
 	}
 
 	// Override with environment variables if set
@@ -198,17 +214,32 @@ func LoadConfig(configPath string) (*Config, error) {
 func SaveConfig(cfg *Config, configPath string) error {
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
-		return fmt.Errorf("marshal config: %w", err)
+		return errors.NewInternalError(
+			"Cannot encode configuration",
+			"YAML marshaling failed unexpectedly",
+			"This is a bug. Please report it with your configuration details",
+			err,
+		)
 	}
 
 	// Ensure directory exists
 	dir := filepath.Dir(configPath)
 	if err := os.MkdirAll(dir, 0750); err != nil {
-		return fmt.Errorf("create config directory: %w", err)
+		return errors.NewPermissionError(
+			"Cannot create configuration directory",
+			fmt.Sprintf("Permission denied creating %s", dir),
+			"Check directory permissions or run with appropriate privileges",
+			err,
+		)
 	}
 
 	if err := os.WriteFile(configPath, data, 0600); err != nil {
-		return fmt.Errorf("write config file: %w", err)
+		return errors.NewPermissionError(
+			"Cannot write configuration file",
+			fmt.Sprintf("Permission denied writing to %s", configPath),
+			"Check file permissions and ensure sufficient disk space",
+			err,
+		)
 	}
 
 	return nil
@@ -253,12 +284,22 @@ func findConfigFile() (string, error) {
 		if _, err := os.Stat(configPath); err == nil {
 			return configPath, nil
 		}
-		return "", fmt.Errorf("config file not found at CIE_CONFIG_PATH=%s", configPath)
+		return "", errors.NewConfigError(
+			"Configuration file not found",
+			fmt.Sprintf("CIE_CONFIG_PATH is set to '%s' but the file does not exist", configPath),
+			"Fix the CIE_CONFIG_PATH environment variable or run 'cie init' to create a config",
+			nil,
+		)
 	}
 
 	dir, err := os.Getwd()
 	if err != nil {
-		return "", fmt.Errorf("get working directory: %w", err)
+		return "", errors.NewInternalError(
+			"Cannot access working directory",
+			"Failed to determine current directory path",
+			"Check system permissions and try again",
+			err,
+		)
 	}
 
 	for {
@@ -275,7 +316,12 @@ func findConfigFile() (string, error) {
 		dir = parent
 	}
 
-	return "", fmt.Errorf("no .cie/project.yaml found in current or parent directories; run 'cie init' first")
+	return "", errors.NewConfigError(
+		"Configuration not found",
+		"No .cie/project.yaml file found in current directory or any parent directory",
+		"Run 'cie init' to create a new configuration",
+		nil,
+	)
 }
 
 // applyEnvOverrides applies environment variable overrides to the configuration.

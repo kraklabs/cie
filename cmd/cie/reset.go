@@ -24,6 +24,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/kraklabs/cie/internal/errors"
 )
 
 // runReset executes the 'reset' CLI command, deleting all local indexed data.
@@ -61,23 +63,28 @@ Options:
 	}
 
 	if !*confirm {
-		fmt.Fprintf(os.Stderr, "Error: you must pass --yes to confirm the reset\n")
-		fmt.Fprintf(os.Stderr, "This will delete all indexed data for the project.\n")
-		os.Exit(1)
+		errors.FatalError(errors.NewInputError(
+			"Confirmation required",
+			"The --yes flag is required to confirm this destructive operation",
+			"Run 'cie reset --yes' to confirm that you want to delete all indexed data",
+		), false)
 	}
 
 	// Load configuration
 	cfg, err := LoadConfig(configPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		errors.FatalError(err, false) // LoadConfig returns UserError
 	}
 
 	// Determine data directory
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: cannot get home directory: %v\n", err)
-		os.Exit(1)
+		errors.FatalError(errors.NewInternalError(
+			"Cannot determine home directory",
+			"Operating system failed to provide user home directory path",
+			"Check your system configuration or set the HOME environment variable",
+			err,
+		), false)
 	}
 	dataDir := filepath.Join(homeDir, ".cie", "data", cfg.ProjectID)
 
@@ -91,8 +98,12 @@ Options:
 
 	// Delete the data directory
 	if err := os.RemoveAll(dataDir); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: failed to delete data: %v\n", err)
-		os.Exit(1)
+		errors.FatalError(errors.NewPermissionError(
+			"Cannot delete data directory",
+			fmt.Sprintf("Failed to remove %s - permission denied or file locked", dataDir),
+			"Check directory permissions, ensure no other CIE processes are running, and try again",
+			err,
+		), false)
 	}
 
 	fmt.Println("Reset complete. All local indexed data has been deleted.")
