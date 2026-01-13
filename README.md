@@ -147,13 +147,55 @@ cie
 
 ## Development
 
+### Testing
+
+CIE uses a two-tier testing approach:
+
+**Unit Tests (default)** - Fast in-memory tests, no CozoDB installation required:
 ```bash
-# Run tests
+# Run all unit tests
 go test ./...
 
-# Run tests with CozoDB (requires libcozo_c)
-go test -tags=cozodb ./...
+# Run with short flag
+go test -short ./...
+```
 
+**Integration Tests** - Use Docker containers with CozoDB:
+```bash
+# Build test container (first time only)
+make docker-build-cie-test
+
+# Run integration tests
+go test -tags=cozodb ./...
+```
+
+The testcontainer infrastructure automatically handles:
+- Building Docker images if missing
+- Mounting project directories
+- Cleaning up containers
+- Graceful fallback if Docker unavailable
+
+For detailed testing documentation, see [docs/testing.md](docs/testing.md).
+
+### Writing Tests
+
+Use the CIE testing helpers for easy test setup:
+
+```go
+import cietest "github.com/kraklabs/cie/internal/testing"
+
+func TestMyFeature(t *testing.T) {
+    backend := cietest.SetupTestBackend(t)
+    cietest.InsertTestFunction(t, backend, "func1", "MyFunc", "file.go", 10, 20)
+
+    result := cietest.QueryFunctions(t, backend)
+    require.Len(t, result.Rows, 1)
+}
+```
+
+### Building
+
+```bash
 # Build all commands
 make build-all
 
