@@ -31,6 +31,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kraklabs/cie/internal/errors"
 	"github.com/kraklabs/cie/pkg/ingestion"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -79,8 +80,12 @@ Options:
 	// Load configuration
 	cfg, err := LoadConfig(configPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		errors.FatalError(errors.NewConfigError(
+			"Cannot load CIE configuration",
+			"Configuration file is missing or invalid",
+			"Run 'cie init' to create a new configuration",
+			err,
+		), false)
 	}
 
 	// Setup logging
@@ -133,8 +138,12 @@ Options:
 	// Get current directory as repo path
 	cwd, err := os.Getwd()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: cannot get current directory: %v\n", err)
-		os.Exit(1)
+		errors.FatalError(errors.NewInternalError(
+			"Cannot access current directory",
+			"Failed to determine working directory",
+			"This is unexpected. Please report this issue at github.com/kraklabs/kraken/issues",
+			err,
+		), false)
 	}
 
 	// Map embedding provider
@@ -192,8 +201,12 @@ func runLocalIndex(ctx context.Context, logger *slog.Logger, cfg *Config, repoPa
 	// Ensure checkpoint directory exists
 	checkpointDir := filepath.Join(ConfigDir(repoPath), "checkpoints")
 	if err := os.MkdirAll(checkpointDir, 0750); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: cannot create checkpoint directory: %v\n", err)
-		os.Exit(1)
+		errors.FatalError(errors.NewPermissionError(
+			"Cannot create checkpoint directory",
+			"Permission denied or insufficient disk space",
+			"Check permissions on .cie/checkpoints/ or free up disk space",
+			err,
+		), false)
 	}
 
 	// Combine default excludes with user-specified ones
@@ -235,8 +248,12 @@ func runLocalIndex(ctx context.Context, logger *slog.Logger, cfg *Config, repoPa
 
 	pipeline, err := ingestion.NewLocalPipeline(config, logger)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: create pipeline: %v\n", err)
-		os.Exit(1)
+		errors.FatalError(errors.NewDatabaseError(
+			"Cannot initialize indexing pipeline",
+			"Failed to open or initialize the database",
+			"Try 'cie reset' to rebuild the database, or close other CIE instances",
+			err,
+		), false)
 	}
 	defer func() { _ = pipeline.Close() }()
 
@@ -249,8 +266,12 @@ func runLocalIndex(ctx context.Context, logger *slog.Logger, cfg *Config, repoPa
 
 	result, err := pipeline.Run(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: indexing failed: %v\n", err)
-		os.Exit(1)
+		errors.FatalError(errors.NewDatabaseError(
+			"Indexing operation failed",
+			"An error occurred during repository indexing",
+			"Check the error details above. If this persists, try 'cie reset --force'",
+			err,
+		), false)
 	}
 
 	printResult(result)
@@ -288,7 +309,16 @@ func printResult(result *ingestion.IngestionResult) {
 	fmt.Println()
 	fmt.Println("=== Indexing Complete ===")
 	fmt.Printf("Project ID: %s\n", result.ProjectID)
-	fmt.Printf("Files Processed: %d\n", result.FilesProcessed)
+
+	// Add progress indicators for file processing
+	fmt.Printf("Files Processed: %d ", result.FilesProcessed)
+	if result.ParseErrors > 0 {
+		successRate := 100.0 * (1.0 - result.ParseErrorRate)
+		fmt.Printf("(%.1f%% success rate)\n", successRate)
+	} else {
+		fmt.Println("✓")
+	}
+
 	fmt.Printf("Functions Extracted: %d\n", result.FunctionsExtracted)
 	fmt.Printf("Types Extracted: %d\n", result.TypesExtracted)
 	fmt.Printf("Defines Edges: %d\n", result.DefinesEdges)
