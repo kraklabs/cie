@@ -1,5 +1,11 @@
 # CIE - Code Intelligence Engine
 
+[![CI](https://github.com/kraklabs/kraken/actions/workflows/build-cie.yaml/badge.svg)](https://github.com/kraklabs/kraken/actions/workflows/build-cie.yaml)
+[![codecov](https://codecov.io/gh/kraklabs/kraken/branch/main/graph/badge.svg?flag=cie)](https://codecov.io/gh/kraklabs/kraken)
+[![Go Report Card](https://goreportcard.com/badge/github.com/kraklabs/kraken)](https://goreportcard.com/report/github.com/kraklabs/kraken)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/kraklabs/kraken)](go.mod)
+[![License](https://img.shields.io/badge/license-AGPL%20v3-blue.svg)](LICENSE)
+
 CIE is a powerful code intelligence tool that indexes your codebase and provides semantic search, call graph analysis, and AI-powered code understanding through the Model Context Protocol (MCP).
 
 ## Features
