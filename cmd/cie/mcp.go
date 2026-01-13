@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/kraklabs/cie/internal/errors"
 	"github.com/kraklabs/cie/pkg/llm"
 	"github.com/kraklabs/cie/pkg/tools"
 )
@@ -170,7 +171,15 @@ func runMCPServer(configPath string) {
 	// Try to load config
 	cfg, err = LoadConfig(configPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Config load failed: %v\n", err)
+		ue := errors.NewConfigError(
+			"Cannot load CIE configuration file",
+			"Configuration file is missing or invalid",
+			"Using environment variables as fallback. Run 'cie init' to create a proper config.",
+			err,
+		)
+		// Don't fatal, just log warning
+		fmt.Fprintf(os.Stderr, "%s\n", ue.Format(false))
+
 		// Fall back to environment variables
 		cfg = DefaultConfig("")
 		cfg.applyEnvOverrides() // Apply LLM and other env overrides
@@ -182,6 +191,16 @@ func runMCPServer(configPath string) {
 	}
 
 	client := tools.NewCIEClient(cfg.CIE.EdgeCache, cfg.ProjectID)
+
+	// Validate edge cache connection is configured
+	if cfg.CIE.EdgeCache == "" {
+		errors.FatalError(errors.NewNetworkError(
+			"Cannot start MCP server",
+			"CIE_BASE_URL is not set or Edge Cache is not configured",
+			"Set CIE_BASE_URL environment variable or check your .cie/project.yaml config",
+			fmt.Errorf("edge cache URL is empty"),
+		), false)
+	}
 
 	// Configure embedding for semantic search in analyze
 	client.SetEmbeddingConfig(cfg.Embedding.BaseURL, cfg.Embedding.Model)
@@ -196,13 +215,25 @@ func runMCPServer(configPath string) {
 			APIKey:       cfg.LLM.APIKey,
 		})
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to configure LLM provider: %v\n", err)
+			ue := errors.NewConfigError(
+				"Failed to configure LLM provider",
+				"LLM settings are invalid or the provider is unreachable",
+				"Check CIE_LLM_URL, CIE_LLM_MODEL, and CIE_LLM_API_KEY. Some features will be disabled.",
+				err,
+			)
+			fmt.Fprintf(os.Stderr, "%s\n", ue.Format(false))
 		} else {
 			client.SetLLMProvider(provider, cfg.LLM.MaxTokens)
 			fmt.Fprintf(os.Stderr, "  LLM configured: %s (%s)\n", cfg.LLM.BaseURL, cfg.LLM.Model)
 		}
 	} else {
-		fmt.Fprintf(os.Stderr, "  LLM not enabled (enabled=%v, url=%q)\n", cfg.LLM.Enabled, cfg.LLM.BaseURL)
+		ue := errors.NewConfigError(
+			"No LLM provider available",
+			"Neither file-based config nor environment variables provided LLM settings",
+			"Some features will be disabled. Set CIE_LLM_URL, CIE_LLM_MODEL, or run 'cie init'.",
+			nil,
+		)
+		fmt.Fprintf(os.Stderr, "%s\n", ue.Format(false))
 	}
 
 	server := &mcpServer{
@@ -227,7 +258,12 @@ func runMCPServer(configPath string) {
 
 		var req jsonRPCRequest
 		if err := json.Unmarshal([]byte(line), &req); err != nil {
-			fmt.Fprintf(os.Stderr, "JSON parse error: %v\n", err)
+			ue := errors.NewInputError(
+				"Invalid JSON in MCP request",
+				"The request does not conform to JSON-RPC 2.0 format",
+				"Check your MCP client configuration or update Claude Code/Cursor",
+			)
+			fmt.Fprintf(os.Stderr, "%s\n", ue.Format(false))
 			continue
 		}
 
@@ -242,7 +278,13 @@ func runMCPServer(configPath string) {
 
 		respBytes, err := json.Marshal(resp)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Marshal error: %v\n", err)
+			ue := errors.NewInternalError(
+				"Cannot encode MCP response",
+				"Failed to marshal response to JSON",
+				"This is a bug. Please report it with the request details.",
+				err,
+			)
+			fmt.Fprintf(os.Stderr, "%s\n", ue.Format(false))
 			continue
 		}
 
@@ -253,7 +295,13 @@ func runMCPServer(configPath string) {
 	}
 
 	if err := scanner.Err(); err != nil {
-		fmt.Fprintf(os.Stderr, "Scanner error: %v\n", err)
+		ue := errors.NewInternalError(
+			"MCP server input error",
+			"Failed to read from stdin",
+			"Check if stdin is closed or if there's a pipe issue.",
+			err,
+		)
+		errors.FatalError(ue, false)
 	}
 }
 
