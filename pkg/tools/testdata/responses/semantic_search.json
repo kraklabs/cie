@@ -1,0 +1,31 @@
+{
+  "functions": [
+    {
+      "name": "HandleRequest",
+      "file_path": "handlers/handler.go",
+      "line": 25,
+      "signature": "func (h *Handler) HandleRequest(ctx context.Context, req *Request) (*Response, error)",
+      "similarity": 0.85,
+      "role": "handler"
+    },
+    {
+      "name": "ProcessRequest",
+      "file_path": "processors/processor.go",
+      "line": 42,
+      "signature": "func ProcessRequest(req *Request) (*Response, error)",
+      "similarity": 0.72,
+      "role": "source"
+    },
+    {
+      "name": "ValidateRequest",
+      "file_path": "validation/validator.go",
+      "line": 18,
+      "signature": "func ValidateRequest(req *Request) error",
+      "similarity": 0.68,
+      "role": "source"
+    }
+  ],
+  "query": "HTTP request handling logic",
+  "total_results": 3,
+  "processing_time_ms": 45
+}
