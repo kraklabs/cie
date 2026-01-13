@@ -173,8 +173,6 @@ func runInteractiveConfig(reader *bufio.Reader, cfg *Config) {
 	fmt.Println()
 
 	cfg.ProjectID = prompt(reader, "Project ID", cfg.ProjectID)
-	cfg.CIE.EdgeCache = prompt(reader, "CIE Edge Cache URL", cfg.CIE.EdgeCache)
-	cfg.CIE.PrimaryHub = prompt(reader, "CIE Primary Hub (gRPC)", cfg.CIE.PrimaryHub)
 
 	fmt.Println()
 	fmt.Println("Embedding Providers: ollama, nomic, mock")

@@ -14,6 +14,9 @@
 
 set -e
 
+# Set library path for CozoDB (required on macOS)
+export DYLD_LIBRARY_PATH=/usr/local/lib:/usr/local/lib64:${DYLD_LIBRARY_PATH}
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -129,12 +132,12 @@ echo -e "${GREEN}✓${NC} Test project created in ${STEP1_DURATION}s"
 time_step "Initialize CIE (cie init)" "2"
 STEP2_START=$(date +%s)
 
-# Run cie init from the monorepo if binary not in PATH
+# Run cie init from the monorepo if binary not in PATH (use -y for non-interactive)
 if command -v cie &> /dev/null; then
-    cie init
+    cie init -y
 else
     # Assume we're running from kraken root
-    go run /Users/francisco/code/kraklabs/kraken/modules/cie/cmd/cie init
+    go run /Users/francisco/code/kraklabs/kraken/modules/cie/cmd/cie init -y
 fi
 
 STEP2_END=$(date +%s)

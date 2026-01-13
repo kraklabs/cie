@@ -109,8 +109,13 @@ func DefaultConfig(projectID string) *Config {
 		Version:   configVersion,
 		ProjectID: projectID,
 		CIE: CIEConfig{
-			PrimaryHub: getEnv("CIE_PRIMARY_HUB", "localhost:50051"),
-			EdgeCache:  getEnv("CIE_BASE_URL", "http://localhost:8080"),
+			// Primary Hub and Edge Cache are for enterprise/distributed deployments only.
+			// Leave empty for standalone mode (local CozoDB storage).
+			// Can be configured via environment variables if needed:
+			//   export CIE_PRIMARY_HUB=your-hub:50051
+			//   export CIE_BASE_URL=http://your-cache:8080
+			PrimaryHub: getEnv("CIE_PRIMARY_HUB", ""),
+			EdgeCache:  getEnv("CIE_BASE_URL", ""),
 		},
 		Embedding: EmbeddingConfig{
 			Provider: "ollama",
