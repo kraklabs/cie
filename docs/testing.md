@@ -54,6 +54,53 @@ The testcontainer infrastructure automatically:
 - Executes tests inside the container
 - Cleans up after completion
 
+## Coverage
+
+### Checking Coverage
+
+Generate and view test coverage reports:
+
+```bash
+# Generate coverage report
+cd modules/cie
+go test -coverprofile=coverage.out ./...
+
+# View coverage summary
+go tool cover -func=coverage.out
+
+# View total coverage
+go tool cover -func=coverage.out | grep total
+
+# View coverage in browser
+make test-coverage
+```
+
+### Coverage Targets
+
+| Package | Target | Description |
+|---------|--------|-------------|
+| pkg/tools | >80% | Core CIE tools (semantic search, grep, analysis) |
+| pkg/ingestion | >60% | Code parsing and indexing pipeline |
+| pkg/storage | >80% | Storage backend abstractions |
+| pkg/llm | >50% | LLM provider integrations |
+
+### Coverage in CI
+
+The CI pipeline automatically generates coverage reports:
+
+```yaml
+- name: Test with coverage
+  run: |
+    cd modules/cie
+    go test -race -coverprofile=coverage.out -covermode=atomic ./...
+
+- name: Upload to Codecov
+  uses: codecov/codecov-action@v4
+  with:
+    files: coverage.out
+    flags: unittests
+```
+
 ## Writing Tests
 
 ### Unit Tests (No CozoDB Installation Required)
