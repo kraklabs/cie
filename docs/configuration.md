@@ -1457,6 +1457,8 @@ cie test embedding
 # ✓ Test embedding: 384 dimensions
 ```
 
+**For more configuration troubleshooting issues, see the [Troubleshooting Guide](./troubleshooting.md).**
+
 ---
 
 ## Migration Guide

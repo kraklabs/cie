@@ -439,7 +439,7 @@ Common issues and quick fixes:
 | **No functions found** | `Functions indexed: 0` | Check file extensions. Supported: `.go`, `.py`, `.js`, `.ts`, `.tsx`. |
 | **Permission denied** | `cannot create directory .cie` | Check write permissions in project directory: `ls -la` |
 
-**Still having issues?** See the [Troubleshooting Guide](./troubleshooting.md) (coming in T054) or file an issue on [GitHub](https://github.com/kraklabs/kraken/issues).
+**Still having issues?** See the [Troubleshooting Guide](./troubleshooting.md) for comprehensive solutions or file an issue on [GitHub](https://github.com/kraklabs/kraken/issues).
 
 ---
 
