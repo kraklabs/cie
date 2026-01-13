@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "cie": {
+      "command": "cie",
+      "args": [
+        "--mcp",
+        "--config",
+        "/Users/yourname/project/.cie/project.yaml"
+      ],
+      "env": {
+        "CIE_LOG_LEVEL": "info"
+      },
+      "disabled": false
+    }
+  }
+}
