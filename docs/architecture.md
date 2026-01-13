@@ -108,6 +108,23 @@ CIE follows a classic ETL (Extract, Transform, Load) pipeline architecture with 
 
 The indexing pipeline processes source code in 5 distinct stages, each handling a specific transformation.
 
+```mermaid
+graph LR
+    A[Source Files] --> B[Stage 1: RepoLoader]
+    B --> C[Stage 2: TreeSitter Parser]
+    C --> D[Stage 3: CallResolver]
+    D --> E[Stage 4: Embedding Gen]
+    E --> F[Stage 5: CozoDB Storage]
+    F --> G[(CozoDB)]
+
+    B -.Filter by language.-> B
+    B -.Apply excludes.-> B
+    C -.Extract AST.-> C
+    D -.Resolve calls.-> D
+    E -.8 workers.-> E
+    F -.Batch 1000.-> F
+```
+
 ### Stage 1: File Discovery (RepoLoader)
 
 **Purpose:** Locate all source files to be indexed
@@ -409,6 +426,39 @@ On subsequent runs:
 
 CIE uses CozoDB, an embedded graph database with native support for Datalog queries and vector similarity search.
 
+```
+┌─────────────────────────────────────────────────────────┐
+│                   CIE COMPONENTS                        │
+└─────────────────────────────────────────────────────────┘
+
+  ┌──────────────┐
+  │  Ingestion   │
+  │   Pipeline   │
+  │   (5 stages) │
+  └──────┬───────┘
+         │ writes (batch 1000)
+         ▼
+  ┌──────────────────────────────────────┐
+  │         CozoDB Storage               │
+  │  ┌──────────┐  ┌──────────────────┐ │
+  │  │ Metadata │  │  Code + Embeddings│ │
+  │  │  Tables  │  │   (lazy loaded)   │ │
+  │  └──────────┘  └──────────────────┘ │
+  └─────┬────────────────────────────────┘
+        │ reads (Datalog queries)
+        ▼
+  ┌──────────────┐         ┌──────────────┐
+  │  Query Tools │────────►│ LLM Provider │
+  │   (20+ MCP)  │ calls   │ (if analyze) │
+  └──────┬───────┘         └──────────────┘
+         │ returns
+         ▼
+  ┌──────────────┐
+  │  MCP Server  │
+  │  (JSON-RPC)  │
+  └──────────────┘
+```
+
 ### CozoDB Integration
 
 **Implementation:** `pkg/cozodb/cozodb.go`
@@ -453,6 +503,40 @@ db.RunReadOnly(`?[name, file_path] := *cie_function { name, file_path }`)
 **Implementation:** `pkg/ingestion/schema.go:24-35`
 
 **Key Principle: Vertical Partitioning**
+
+```
+VERTICAL PARTITIONING STRATEGY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Instead of:
+┌─────────────────────────────────────────────────┐
+│ cie_function (wide table, ~5.5KB/row)          │
+│ ┌─────┬──────┬────────┬───────┬────────┬─────┐ │
+│ │ id  │ name │  sig   │ code  │ embed  │ ... │ │
+│ └─────┴──────┴────────┴───────┴────────┴─────┘ │
+└─────────────────────────────────────────────────┘
+❌ Problem: Load 5KB even when only need name
+
+We use:
+┌──────────────────────────┐
+│ cie_function (~500 bytes)│  ← Fast queries
+│ ┌─────┬──────┬────────┐  │
+│ │ id  │ name │  sig   │  │
+│ └─────┴──────┴────────┘  │
+└──────────────────────────┘
+          ║
+          ║ 1:1 joins (lazy)
+          ║
+    ┌─────╩──────┐     ┌──────────────────┐
+    │            │     │                  │
+┌───▼──────────┐ │ ┌───▼────────────────┐ │
+│ cie_function │ │ │ cie_function       │ │
+│ _code        │ │ │ _embedding         │ │
+│ (~2KB)       │ │ │ (~3KB, HNSW idx)   │ │
+└──────────────┘ │ └────────────────────┘ │
+  Load when user   │   Load for semantic   │
+  requests code    │   search only         │
+```
 
 Instead of storing everything in one table:
 ```
@@ -658,6 +742,25 @@ candidates[id, score] := ~cie_function_embedding:embedding {
 
 The query layer provides 20+ MCP tools organized by function. All tools query the CozoDB index using Datalog and return structured results.
 
+```mermaid
+sequenceDiagram
+    participant User as Claude Code/Cursor
+    participant MCP as MCP Server
+    participant Tools as Tool Layer
+    participant DB as CozoDB
+    participant LLM as LLM Provider
+
+    User->>MCP: tools/call("cie_semantic_search", query)
+    MCP->>Tools: SemanticSearch(query, limit)
+    Tools->>LLM: Generate embedding(query)
+    LLM-->>Tools: embedding vector [768]
+    Tools->>DB: HNSW kNN search + post-filter
+    DB-->>Tools: Results with scores
+    Tools->>Tools: Apply keyword boosting (+15%)
+    Tools-->>MCP: Formatted results (markdown)
+    MCP-->>User: JSON-RPC response
+```
+
 ### Tool Architecture
 
 **Implementation:** `pkg/tools/`
@@ -691,6 +794,21 @@ func (c *CIEClient) Query(script string) (*QueryResult, error) {
 **Semantic Search** (`pkg/tools/semantic.go`)
 
 The flagship tool for meaning-based code search.
+
+```mermaid
+flowchart LR
+    A[User Query] --> B[Generate Embedding]
+    B --> C[HNSW kNN Search]
+    C --> D[Post-Filter Results]
+    D --> E[Keyword Boosting]
+    E --> F[Sort by Score]
+    F --> G[Return Top N]
+
+    C -.Over-fetch k*10.-> C
+    D -.Filter by path, role.-> D
+    E -.+15% for name match.-> E
+    F -.Descending order.-> F
+```
 
 **Process:**
 1. **Generate Query Embedding:**
@@ -881,6 +999,23 @@ Finds call paths from entry points to a target function.
    :sort depth
    :limit $max_paths
    ```
+
+```mermaid
+graph TD
+    A[main] --> B[BuildRouter]
+    A --> C[InitServer]
+    B --> D[RegisterRoutes]
+    C --> E[SetupMiddleware]
+    D --> F[HandleAuth]
+    E --> F
+    F --> G[ValidateToken]
+    F --> H[GetUserFromDB]
+
+    style A fill:#e1f5ff
+    style F fill:#ffe1e1
+    style G fill:#e1ffe1
+    style H fill:#e1ffe1
+```
 
 **Example Output:**
 ```
@@ -1074,6 +1209,36 @@ func IndexStatus(pathPattern string) Status {
 The MCP (Model Context Protocol) server exposes CIE tools to AI assistants via JSON-RPC 2.0.
 
 **Implementation:** `cmd/cie/mcp.go`
+
+```
+┌──────────────────────────────────────────────────────┐
+│               MCP Protocol (JSON-RPC 2.0)            │
+│                    stdin/stdout                       │
+└─────────────────────┬────────────────────────────────┘
+                      │
+         ┌────────────┴────────────┐
+         │                         │
+    ┌────▼────┐              ┌─────▼─────┐
+    │  Claude │              │  Cursor   │
+    │   Code  │              │   IDE     │
+    └────┬────┘              └─────┬─────┘
+         │                         │
+         └────────────┬────────────┘
+                      │
+                      ▼
+         ┌────────────────────────┐
+         │   CIE MCP Server       │
+         │  (cmd/cie/mcp.go)      │
+         └────────────┬───────────┘
+                      │
+         ┌────────────┴────────────┐
+         │                         │
+    ┌────▼─────┐            ┌──────▼──────┐
+    │  20+     │            │   CozoDB    │
+    │  Tools   │───────────►│   Storage   │
+    │  Layer   │   Query    │             │
+    └──────────┘            └─────────────┘
+```
 
 ### JSON-RPC 2.0 Protocol
 
