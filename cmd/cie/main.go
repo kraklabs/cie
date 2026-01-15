@@ -78,6 +78,7 @@ Commands:
   query         Execute CozoScript query
   reset         Reset local project data (destructive!)
   install-hook  Install git post-commit hook for auto-indexing
+  completion    Generate shell completion script (bash|zsh|fish)
 
 Global Options:
   --mcp         Start as MCP server (JSON-RPC over stdio)
@@ -91,6 +92,7 @@ Examples:
   cie status                         Show project status
   cie status --json                  Output as JSON (for MCP)
   cie query "?[name] := *cie_function{name}"
+  cie completion bash                Generate bash completion script
   cie --mcp                          Start as MCP server
 
 Data Storage:
@@ -140,6 +142,8 @@ Environment Variables:
 		runReset(cmdArgs, *configPath)
 	case "install-hook":
 		runInstallHook(cmdArgs, *configPath)
+	case "completion":
+		runCompletion(cmdArgs, *configPath)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", command)
 		flag.Usage()
