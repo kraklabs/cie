@@ -119,17 +119,46 @@ func parseInitFlags(args []string) initFlags {
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `Usage: cie init [options]
 
-Creates .cie/project.yaml configuration file.
+Description:
+  Create a .cie/project.yaml configuration file for the current repository.
 
-Examples:
-  cie init --ip 100.117.59.45           # Configure with Tailscale IP
-  cie init --ip 100.117.59.45 -y        # Non-interactive with defaults
-  cie init --edge-cache http://myserver:8080
-  cie init --hook                       # Also install git hook
+  By default, runs in interactive mode with prompts for each setting.
+  Use -y for non-interactive mode with sensible defaults.
+
+  The configuration defines:
+  - Project identifier and data storage location
+  - Embedding provider (ollama, nomic, openai, mock)
+  - Optional LLM settings for narrative generation
+  - Indexing behavior (exclusions, batch size, etc.)
 
 Options:
 `)
 		fs.PrintDefaults()
+		fmt.Fprintf(os.Stderr, `
+Examples:
+  # Interactive setup with prompts
+  cie init
+
+  # Non-interactive with all defaults
+  cie init -y
+
+  # Configure for Tailscale/NodePort setup (sets edge-cache and primary-hub)
+  cie init --ip 100.117.59.45
+
+  # Configure with custom Edge Cache URL
+  cie init --edge-cache http://myserver:8080
+
+  # Initialize and install git hook for auto-indexing
+  cie init --hook
+
+  # Custom project ID (default: directory name)
+  cie init --project-id my-awesome-project
+
+Notes:
+  Configuration is stored in .cie/project.yaml in the repository root.
+  You can edit this file manually or re-run init with --force to recreate.
+
+`)
 	}
 	if err := fs.Parse(args); err != nil {
 		os.Exit(1)

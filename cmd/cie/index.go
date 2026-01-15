@@ -65,12 +65,42 @@ func runIndex(args []string, configPath string) {
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `Usage: cie index [options]
 
-Indexes the current repository using configuration from .cie/project.yaml.
-Data is stored locally in ~/.cie/data/<project_id>/
+Description:
+  Index the current repository to build a searchable code intelligence
+  database. This parses source files using Tree-sitter, extracts functions,
+  types, and call graphs, and generates embeddings for semantic search.
+
+  The indexing process runs incrementally by default, only processing
+  changed files since the last index. Use --full to force a complete
+  reindex from scratch.
+
+  Indexed data is stored locally in ~/.cie/data/<project_id>/
 
 Options:
 `)
 		fs.PrintDefaults()
+		fmt.Fprintf(os.Stderr, `
+Examples:
+  # Initial indexing (or incremental update)
+  cie index
+
+  # Force full reindex of entire repository
+  cie index --full
+
+  # Delete checkpoint and reindex everything
+  cie index --force-full-reindex
+
+  # Use 16 parallel workers for faster embedding generation
+  cie index --embed-workers 16
+
+  # Enable debug logging and expose metrics
+  cie index --debug --metrics-addr :9090
+
+Notes:
+  Indexing may take several minutes for large repositories. Progress
+  indicators will show files processed and errors encountered.
+
+`)
 	}
 
 	if err := fs.Parse(args); err != nil {

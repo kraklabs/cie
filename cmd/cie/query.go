@@ -30,6 +30,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/kraklabs/cie/internal/errors"
 	"github.com/kraklabs/cie/pkg/storage"
 )
 
@@ -57,24 +58,40 @@ func runQuery(args []string, configPath string) {
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `Usage: cie query [options] <cozoscript>
 
-Executes a CozoScript query against the local CIE database.
+Description:
+  Execute a CozoScript query against the indexed codebase database.
+
+  CozoScript is a Datalog-based query language that allows powerful
+  graph queries over your code structure. Use this for advanced code
+  analysis beyond what the MCP tools provide.
+
+  Results can be formatted as tables (default) or JSON for programmatic use.
 
 Options:
 `)
 		fs.PrintDefaults()
 		fmt.Fprintf(os.Stderr, `
 Examples:
-  # List all functions
-  cie query "?[name, file_path] := *cie_function { name, file_path }" --limit 10
+  # List all functions with file paths
+  cie query "?[name, file] := *cie_function{ name, file_path: file }" --limit 10
 
-  # Search by name
-  cie query "?[name, file_path] := *cie_function { name, file_path }, regex_matches(name, '(?i)embed')"
+  # Search functions by name pattern (case-insensitive regex)
+  cie query "?[name] := *cie_function{ name }, regex_matches(name, '(?i)embed')"
 
-  # Count files
-  cie query "?[count(id)] := *cie_file { id }"
+  # Count total files indexed
+  cie query "?[count(id)] := *cie_file{ id }"
 
-  # Find callers of a function
-  cie query "?[caller] := *cie_calls { caller_id, callee_id }, *cie_function { id: callee_id, name: 'NewPipeline' }, *cie_function { id: caller_id, name: caller }"
+  # Find all callers of a specific function
+  cie query "?[caller] := *cie_calls{ caller_id, callee_id },
+    *cie_function{ id: callee_id, name: 'NewPipeline' },
+    *cie_function{ id: caller_id, name: caller }"
+
+  # Output as JSON for scripting
+  cie query "?[name] := *cie_function{ name }" --json | jq '.rows[][0]'
+
+Notes:
+  Query timeout defaults to 30s. Increase with --timeout flag for complex queries.
+  See docs/tools-reference.md for complete schema and query patterns.
 
 `)
 	}
@@ -84,9 +101,12 @@ Examples:
 	}
 
 	if fs.NArg() == 0 {
-		fmt.Fprintf(os.Stderr, "Error: script argument required\n")
 		fs.Usage()
-		os.Exit(1)
+		errors.FatalError(errors.NewInputError(
+			"Script argument required",
+			"No CozoScript query provided",
+			"Provide a query: cie query '?[name] := *cie_function{name}'",
+		), *jsonOutput)
 	}
 
 	script := fs.Arg(0)
@@ -102,35 +122,34 @@ Examples:
 	// Load configuration
 	cfg, err := LoadConfig(configPath)
 	if err != nil {
-		if *jsonOutput {
-			outputQueryError(err)
-		} else {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		}
-		os.Exit(1)
+		errors.FatalError(errors.NewConfigError(
+			"Cannot load CIE configuration",
+			"Configuration file is missing or invalid",
+			"Run 'cie init' to create a new configuration",
+			err,
+		), *jsonOutput)
 	}
 
 	// Determine data directory
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		if *jsonOutput {
-			outputQueryError(err)
-		} else {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		}
-		os.Exit(1)
+		errors.FatalError(errors.NewInternalError(
+			"Cannot determine home directory",
+			"Operating system did not provide user home directory path",
+			"Check your system configuration or set HOME environment variable",
+			err,
+		), *jsonOutput)
 	}
 	dataDir := filepath.Join(homeDir, ".cie", "data", cfg.ProjectID)
 
 	// Check if data directory exists
 	if _, err := os.Stat(dataDir); os.IsNotExist(err) {
-		err := fmt.Errorf("project '%s' not indexed yet. Run 'cie index' first", cfg.ProjectID)
-		if *jsonOutput {
-			outputQueryError(err)
-		} else {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		}
-		os.Exit(1)
+		errors.FatalError(errors.NewDatabaseError(
+			fmt.Sprintf("Project '%s' not indexed yet", cfg.ProjectID),
+			"The CIE database does not exist for this project",
+			"Run 'cie index' to index the repository first",
+			err,
+		), *jsonOutput)
 	}
 
 	// Open local backend
@@ -140,12 +159,12 @@ Examples:
 		ProjectID: cfg.ProjectID,
 	})
 	if err != nil {
-		if *jsonOutput {
-			outputQueryError(err)
-		} else {
-			fmt.Fprintf(os.Stderr, "Error: cannot open database: %v\n", err)
-		}
-		os.Exit(1)
+		errors.FatalError(errors.NewDatabaseError(
+			"Cannot open CIE database",
+			"The database file may be corrupted or locked by another process",
+			"Try running 'cie status' to check database health, or 'cie reset' to rebuild",
+			err,
+		), *jsonOutput)
 	}
 	defer func() { _ = backend.Close() }()
 
@@ -154,12 +173,26 @@ Examples:
 
 	result, err := backend.Query(ctx, script)
 	if err != nil {
-		if *jsonOutput {
-			outputQueryError(err)
-		} else {
-			fmt.Fprintf(os.Stderr, "Error: query failed: %v\n", err)
+		// Distinguish between syntax errors and execution errors
+		if strings.Contains(err.Error(), "parse") || strings.Contains(err.Error(), "syntax") {
+			errors.FatalError(errors.NewInputError(
+				"Invalid CozoScript query syntax",
+				fmt.Sprintf("Query parsing failed: %v", err),
+				"Check the CozoScript documentation or run 'cie query --help' for examples",
+			), *jsonOutput)
 		}
-		os.Exit(1)
+		errors.FatalError(errors.NewDatabaseError(
+			"Query execution failed",
+			fmt.Sprintf("Database returned an error: %v", err),
+			"Check your query syntax and ensure the database is not corrupted",
+			err,
+		), *jsonOutput)
+	}
+
+	// Warn about empty results in non-JSON mode
+	if len(result.Rows) == 0 && !*jsonOutput {
+		fmt.Fprintf(os.Stderr, "Warning: Query returned no results\n")
+		fmt.Fprintf(os.Stderr, "Hint: Try broadening your query or verify the database is indexed with 'cie status'\n")
 	}
 
 	if *jsonOutput {
@@ -167,17 +200,6 @@ Examples:
 	} else {
 		printQueryResult(result)
 	}
-}
-
-// outputQueryError writes a query error as JSON to stdout.
-//
-// Used when --json flag is set and a query fails, ensuring consistent JSON output.
-func outputQueryError(err error) {
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	_ = enc.Encode(map[string]any{
-		"error": err.Error(),
-	})
 }
 
 // outputQueryJSON writes query results as formatted JSON to stdout.

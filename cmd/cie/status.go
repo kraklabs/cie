@@ -66,11 +66,38 @@ func runStatus(args []string, configPath string) {
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `Usage: cie status [options]
 
-Shows local project status.
+Description:
+  Display the current status of the CIE project including indexing
+  statistics and database health.
+
+  This queries the local CozoDB database to count indexed entities:
+  files, functions, types, embeddings, and call graph edges.
+
+  Use this to verify indexing completed successfully and understand
+  the scope of your indexed codebase.
 
 Options:
 `)
 		fs.PrintDefaults()
+		fmt.Fprintf(os.Stderr, `
+Examples:
+  # Show human-readable status
+  cie status
+
+  # Output as JSON for programmatic use
+  cie status --json
+
+  # Pipe to jq for specific field extraction
+  cie status --json | jq '.functions'
+
+Output Fields:
+  - Files:         Number of source files indexed
+  - Functions:     Number of functions/methods extracted
+  - Types:         Number of types (structs, interfaces, classes)
+  - Embeddings:    Number of semantic embeddings generated
+  - Call Edges:    Number of function call relationships
+
+`)
 	}
 
 	if err := fs.Parse(args); err != nil {

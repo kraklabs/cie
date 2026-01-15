@@ -60,18 +60,35 @@ func runInstallHook(args []string, configPath string) {
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `Usage: cie install-hook [options]
 
-Installs a git post-commit hook that automatically queues incremental indexing
-after each commit. The hook runs in the background and uses the queue system
-to handle concurrent commits.
+Description:
+  Install a git post-commit hook that automatically triggers incremental
+  indexing after each commit.
 
-Hook behavior:
-  1. On each commit, captures the commit hash
-  2. Runs 'cie index --incremental --until=COMMIT --queue' in background
-  3. If another index is running, queues the commit for later processing
+  This ensures your CIE database stays up-to-date as you write code,
+  making AI-powered code intelligence always current.
+
+  The hook installs to .git/hooks/post-commit. If a hook already exists,
+  use --force to overwrite.
 
 Options:
 `)
 		fs.PrintDefaults()
+		fmt.Fprintf(os.Stderr, `
+Examples:
+  # Install the post-commit hook
+  cie install-hook
+
+  # Force overwrite existing hook
+  cie install-hook --force
+
+  # Remove the installed hook
+  cie install-hook --remove
+
+Notes:
+  The hook runs 'cie index' in the background after each commit.
+  You can also install the hook during 'cie init' with --hook flag.
+
+`)
 	}
 
 	if err := fs.Parse(args); err != nil {

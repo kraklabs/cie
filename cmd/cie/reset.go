@@ -48,14 +48,35 @@ func runReset(args []string, configPath string) {
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `Usage: cie reset [options]
 
-Resets the local project data, clearing all indexed data.
-This is useful before a full re-index to ensure a clean slate.
+Description:
+  WARNING: This is a destructive operation that deletes all locally
+  indexed data for the current project.
 
-WARNING: This operation is destructive and cannot be undone!
+  Removes the ~/.cie/data/<project_id>/ directory, including:
+  - All indexed code intelligence data
+  - Embeddings and call graphs
+  - Indexing checkpoints
+
+  Use this if the database is corrupted or you want to start fresh.
+  You'll need to re-run 'cie index' after resetting.
 
 Options:
 `)
 		fs.PrintDefaults()
+		fmt.Fprintf(os.Stderr, `
+Examples:
+  # Reset requires explicit --yes confirmation
+  cie reset --yes
+
+  # This will NOT work (missing confirmation)
+  cie reset
+  # Error: --yes flag is required to confirm data deletion
+
+Notes:
+  This only affects local data. Configuration (.cie/project.yaml) is not deleted.
+  To also reset configuration, delete .cie/project.yaml manually or use 'cie init --force'.
+
+`)
 	}
 
 	if err := fs.Parse(args); err != nil {

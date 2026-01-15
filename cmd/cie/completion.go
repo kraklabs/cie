@@ -251,16 +251,34 @@ func runCompletion(args []string, configPath string) {
 	fs := flag.NewFlagSet("completion", flag.ExitOnError)
 
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, `Usage: cie completion [bash|zsh|fish]
+		fmt.Fprintf(os.Stderr, `Usage: cie completion <shell>
 
-Generate shell completion scripts for CIE.
+Description:
+  Generate shell completion scripts for bash, zsh, or fish.
 
-Supported shells:
-  bash    Generate bash completion script
-  zsh     Generate zsh completion script
-  fish    Generate fish completion script
+  Shell completions allow you to use Tab to autocomplete commands,
+  flags, and arguments. This improves discoverability and reduces typing.
 
-Installation:
+Arguments:
+  shell    Shell type: bash, zsh, or fish (required)
+
+Examples:
+  # Generate bash completion script
+  cie completion bash
+
+  # Load bash completions in current shell
+  source <(cie completion bash)
+
+  # Install bash completions permanently (Linux)
+  cie completion bash > /etc/bash_completion.d/cie
+
+  # Install zsh completions (macOS with Homebrew)
+  cie completion zsh > $(brew --prefix)/share/zsh/site-functions/_cie
+
+  # Install fish completions
+  cie completion fish > ~/.config/fish/completions/cie.fish
+
+Installation Instructions:
 
 Bash:
   # Load completions in current shell
@@ -273,9 +291,6 @@ Zsh:
   # Enable completion if not already enabled (add to ~/.zshrc)
   echo "autoload -U compinit; compinit" >> ~/.zshrc
 
-  # Load completions in current shell
-  source <(cie completion zsh)
-
   # Install completions permanently
   cie completion zsh > "${fpath[1]}/_cie"
 
@@ -286,10 +301,9 @@ Fish:
   # Install completions permanently
   cie completion fish > ~/.config/fish/completions/cie.fish
 
-Examples:
-  cie completion bash                     # Output bash completion script
-  cie completion zsh > /tmp/cie.zsh       # Save zsh completion to file
-  source <(cie completion bash)           # Load bash completions now
+Notes:
+  After installing completions, restart your shell or source your rc file.
+  For persistent installation, add the source command to ~/.bashrc or ~/.zshrc.
 
 `)
 	}

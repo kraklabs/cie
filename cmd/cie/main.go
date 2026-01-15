@@ -66,7 +66,12 @@ func main() {
 	)
 
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, `CIE - Code Intelligence Engine CLI (Standalone)
+		fmt.Fprintf(os.Stderr, `CIE - Code Intelligence Engine
+
+CIE provides AI-powered code understanding through semantic search,
+call graph analysis, and intelligent querying. It integrates with
+Claude Code and other MCP-compatible tools to give AI assistants
+deep understanding of your codebase.
 
 Usage:
   cie <command> [options]
@@ -95,12 +100,20 @@ Examples:
   cie completion bash                Generate bash completion script
   cie --mcp                          Start as MCP server
 
+Getting Started:
+  1. Initialize configuration:  cie init
+  2. Index your repository:     cie index
+  3. Check indexing status:     cie status
+  4. Run as MCP server:         cie --mcp
+
 Data Storage:
   Data is stored locally in ~/.cie/data/<project_id>/
 
 Environment Variables:
   OLLAMA_HOST        Ollama URL (default: http://localhost:11434)
   OLLAMA_EMBED_MODEL Embedding model (default: nomic-embed-text)
+
+For detailed command help: cie <command> --help
 
 `)
 	}
