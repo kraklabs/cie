@@ -98,10 +98,11 @@ func hashString(s string) uint64 {
 
 // EmbeddingGenerator manages embedding generation with concurrency and retries.
 type EmbeddingGenerator struct {
-	provider EmbeddingProvider
-	workers  int
-	logger   *slog.Logger
-	retry    RetryConfig
+	provider   EmbeddingProvider
+	workers    int
+	logger     *slog.Logger
+	retry      RetryConfig
+	onProgress ProgressCallback // Optional callback for progress reporting
 }
 
 // NewEmbeddingGenerator creates a new embedding generator.
@@ -114,6 +115,19 @@ func NewEmbeddingGenerator(provider EmbeddingProvider, workers int, logger *slog
 		workers:  workers,
 		logger:   logger,
 		retry:    RetryConfig{MaxRetries: 3, InitialBackoff: 200 * time.Millisecond, MaxBackoff: 2 * time.Second, Multiplier: 2.0},
+	}
+}
+
+// SetProgressCallback sets an optional callback for progress reporting.
+// The callback is called during embedding generation with (current, total, phase) arguments.
+func (eg *EmbeddingGenerator) SetProgressCallback(cb ProgressCallback) {
+	eg.onProgress = cb
+}
+
+// reportProgress safely calls the progress callback if set.
+func (eg *EmbeddingGenerator) reportProgress(current, total int64, phase string) {
+	if eg.onProgress != nil {
+		eg.onProgress(current, total, phase)
 	}
 }
 
@@ -178,6 +192,7 @@ func (eg *EmbeddingGenerator) embedFunctionsSequential(ctx context.Context, func
 	results := make([]FunctionEntity, len(functions))
 	errorCount := 0
 	truncatedCount := 0
+	totalFunctions := int64(len(functions))
 
 	for i, fn := range functions {
 		select {
@@ -196,6 +211,8 @@ func (eg *EmbeddingGenerator) embedFunctionsSequential(ctx context.Context, func
 
 		fn.Embedding = embedding
 		results[i] = fn
+		// Report progress after each embedding
+		eg.reportProgress(int64(i+1), totalFunctions, "embedding")
 	}
 
 	// Log summary if there were errors or truncations (instead of individual warnings)
@@ -226,6 +243,8 @@ type embeddingJobResult struct {
 func (eg *EmbeddingGenerator) embedFunctionsParallel(ctx context.Context, functions []FunctionEntity) (*EmbedFunctionsResult, error) {
 	results := make([]FunctionEntity, len(functions))
 	var errorCount, truncatedCount int32
+	var progressCount int64
+	totalFunctions := int64(len(functions))
 
 	jobs := make(chan int, len(functions))
 	resultsChan := make(chan embeddingJobResult, len(functions))
@@ -233,7 +252,7 @@ func (eg *EmbeddingGenerator) embedFunctionsParallel(ctx context.Context, functi
 	var wg sync.WaitGroup
 	for w := 0; w < eg.workers; w++ {
 		wg.Add(1)
-		go eg.embeddingWorker(ctx, &wg, functions, jobs, resultsChan, &errorCount, &truncatedCount)
+		go eg.embeddingWorker(ctx, &wg, functions, jobs, resultsChan, &errorCount, &truncatedCount, &progressCount, totalFunctions)
 	}
 
 	for i := range functions {
@@ -267,6 +286,8 @@ func (eg *EmbeddingGenerator) embeddingWorker(
 	jobs <-chan int,
 	results chan<- embeddingJobResult,
 	errorCount, truncatedCount *int32,
+	progressCount *int64,
+	totalFunctions int64,
 ) {
 	defer wg.Done()
 	for i := range jobs {
@@ -283,6 +304,9 @@ func (eg *EmbeddingGenerator) embeddingWorker(
 		}
 		fn.Embedding = embedding
 		results <- embeddingJobResult{i, fn, err != nil, wasTruncated}
+		// Report progress after each embedding
+		current := atomic.AddInt64(progressCount, 1)
+		eg.reportProgress(current, totalFunctions, "embedding")
 	}
 }
 
@@ -337,6 +361,7 @@ func (eg *EmbeddingGenerator) embedTypesSequential(ctx context.Context, types []
 	results := make([]TypeEntity, len(types))
 	errorCount := 0
 	truncatedCount := 0
+	totalTypes := int64(len(types))
 
 	for i, t := range types {
 		select {
@@ -355,6 +380,8 @@ func (eg *EmbeddingGenerator) embedTypesSequential(ctx context.Context, types []
 
 		t.Embedding = embedding
 		results[i] = t
+		// Report progress after each embedding
+		eg.reportProgress(int64(i+1), totalTypes, "embedding_types")
 	}
 
 	if errorCount > 0 || truncatedCount > 0 {
@@ -377,6 +404,8 @@ func (eg *EmbeddingGenerator) embedTypesParallel(ctx context.Context, types []Ty
 	results := make([]TypeEntity, len(types))
 	errorCount := int32(0)
 	truncatedCount := int32(0)
+	var progressCount int64
+	totalTypes := int64(len(types))
 
 	// Create channels for work distribution
 	jobs := make(chan int, len(types))
@@ -416,6 +445,9 @@ func (eg *EmbeddingGenerator) embedTypesParallel(ctx context.Context, types []Ty
 					err       bool
 					truncated bool
 				}{i, t, err != nil, wasTruncated}
+				// Report progress after each embedding
+				current := atomic.AddInt64(&progressCount, 1)
+				eg.reportProgress(current, totalTypes, "embedding_types")
 			}
 		}()
 	}

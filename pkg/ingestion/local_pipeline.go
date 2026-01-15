@@ -33,6 +33,13 @@ import (
 	"github.com/kraklabs/cie/pkg/storage"
 )
 
+// ProgressCallback is called to report progress during pipeline execution.
+// Parameters:
+//   - current: current item number (1-based)
+//   - total: total number of items
+//   - phase: current phase name ("parsing", "embedding", "writing")
+type ProgressCallback func(current, total int64, phase string)
+
 // LocalPipeline orchestrates ingestion to a local CozoDB backend.
 // This is the standalone/open-source version that doesn't require Primary Hub.
 type LocalPipeline struct {
@@ -44,6 +51,7 @@ type LocalPipeline struct {
 	backend       *storage.EmbeddedBackend
 	checkpointMgr *CheckpointManager
 	datalogBuild  *DatalogBuilder
+	onProgress    ProgressCallback // Optional callback for progress reporting
 }
 
 // IngestionResult summarizes the ingestion run.
@@ -219,6 +227,24 @@ func (p *LocalPipeline) Close() error {
 		}
 	}
 	return lastErr
+}
+
+// SetProgressCallback sets an optional callback for progress reporting.
+// The callback is called during parsing and embedding phases with
+// (current, total, phase) arguments.
+func (p *LocalPipeline) SetProgressCallback(cb ProgressCallback) {
+	p.onProgress = cb
+	// Also set callback on embedding generator
+	if p.embeddingGen != nil {
+		p.embeddingGen.SetProgressCallback(cb)
+	}
+}
+
+// reportProgress safely calls the progress callback if set.
+func (p *LocalPipeline) reportProgress(current, total int64, phase string) {
+	if p.onProgress != nil {
+		p.onProgress(current, total, phase)
+	}
 }
 
 // generateRunID generates a deterministic run ID for log correlation.
@@ -448,6 +474,8 @@ func (p *LocalPipeline) parseFilesParallel(ctx context.Context, files []FileInfo
 	resultsChan := make(chan fileResult, len(files))
 
 	var errorCount int32
+	var progressCount int64
+	totalFiles := int64(len(files))
 
 	var wg sync.WaitGroup
 	for w := 0; w < numWorkers; w++ {
@@ -467,6 +495,9 @@ func (p *LocalPipeline) parseFilesParallel(ctx context.Context, files []FileInfo
 					atomic.AddInt32(&errorCount, 1)
 					p.logger.Warn("local.ingestion.parse_file.error", "path", fileInfo.Path, "err", err)
 					resultsChan <- fileResult{index: i, err: err, filePath: fileInfo.Path}
+					// Report progress even on errors
+					current := atomic.AddInt64(&progressCount, 1)
+					p.reportProgress(current, totalFiles, "parsing")
 					continue
 				}
 
@@ -476,6 +507,9 @@ func (p *LocalPipeline) parseFilesParallel(ctx context.Context, files []FileInfo
 					packageName: pr.PackageName,
 					filePath:    fileInfo.Path,
 				}
+				// Report progress after successful parse
+				current := atomic.AddInt64(&progressCount, 1)
+				p.reportProgress(current, totalFiles, "parsing")
 			}
 		}()
 	}
@@ -532,8 +566,9 @@ func (p *LocalPipeline) parseFilesSequential(ctx context.Context, files []FileIn
 		packageNames: make(map[string]string),
 	}
 	errorCount := 0
+	totalFiles := int64(len(files))
 
-	for _, fileInfo := range files {
+	for i, fileInfo := range files {
 		select {
 		case <-ctx.Done():
 			return result, errorCount
@@ -544,6 +579,8 @@ func (p *LocalPipeline) parseFilesSequential(ctx context.Context, files []FileIn
 		if err != nil {
 			errorCount++
 			p.logger.Warn("local.ingestion.parse_file.error", "path", fileInfo.Path, "err", err)
+			// Report progress even on errors
+			p.reportProgress(int64(i+1), totalFiles, "parsing")
 			continue
 		}
 
@@ -558,6 +595,8 @@ func (p *LocalPipeline) parseFilesSequential(ctx context.Context, files []FileIn
 		if pr.PackageName != "" {
 			result.packageNames[fileInfo.Path] = pr.PackageName
 		}
+		// Report progress after successful parse
+		p.reportProgress(int64(i+1), totalFiles, "parsing")
 	}
 
 	return result, errorCount

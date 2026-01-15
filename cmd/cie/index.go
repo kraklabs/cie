@@ -30,6 +30,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/schollz/progressbar/v3"
 	flag "github.com/spf13/pflag"
 
 	"github.com/kraklabs/cie/internal/errors"
@@ -191,7 +192,7 @@ Notes:
 		}
 	}
 
-	runLocalIndex(ctx, logger, cfg, cwd, embeddingProvider, *embedWorkers)
+	runLocalIndex(ctx, logger, cfg, cwd, embeddingProvider, *embedWorkers, globals)
 }
 
 // checkLocalData checks if local indexed data exists and returns the function count.
@@ -228,7 +229,8 @@ func checkLocalData(cfg *Config) (bool, int, error) {
 //   - repoPath: Absolute path to the repository root
 //   - embeddingProvider: Embedding provider name (ollama, nomic, mock)
 //   - embedWorkers: Number of parallel workers for embedding generation
-func runLocalIndex(ctx context.Context, logger *slog.Logger, cfg *Config, repoPath, embeddingProvider string, embedWorkers int) {
+//   - globals: Global CLI flags for progress/output control
+func runLocalIndex(ctx context.Context, logger *slog.Logger, cfg *Config, repoPath, embeddingProvider string, embedWorkers int, globals GlobalFlags) {
 	// Ensure checkpoint directory exists
 	checkpointDir := filepath.Join(ConfigDir(repoPath), "checkpoints")
 	if err := os.MkdirAll(checkpointDir, 0750); err != nil {
@@ -288,6 +290,25 @@ func runLocalIndex(ctx context.Context, logger *slog.Logger, cfg *Config, repoPa
 	}
 	defer func() { _ = pipeline.Close() }()
 
+	// Set up progress reporting
+	progressCfg := NewProgressConfig(globals)
+	var currentBar *progressbar.ProgressBar
+	var currentPhase string
+
+	pipeline.SetProgressCallback(func(current, total int64, phase string) {
+		// Create new bar when phase changes
+		if phase != currentPhase {
+			if currentBar != nil {
+				_ = currentBar.Finish()
+			}
+			currentPhase = phase
+			currentBar = NewProgressBar(progressCfg, total, phaseDescription(phase))
+		}
+		if currentBar != nil {
+			_ = currentBar.Set64(current)
+		}
+	})
+
 	logger.Info("indexing.starting",
 		"mode", "local",
 		"project_id", cfg.ProjectID,
@@ -296,6 +317,12 @@ func runLocalIndex(ctx context.Context, logger *slog.Logger, cfg *Config, repoPa
 	)
 
 	result, err := pipeline.Run(ctx)
+
+	// Clean up progress bar
+	if currentBar != nil {
+		_ = currentBar.Finish()
+	}
+
 	if err != nil {
 		errors.FatalError(errors.NewDatabaseError(
 			"Indexing operation failed",
@@ -306,6 +333,22 @@ func runLocalIndex(ctx context.Context, logger *slog.Logger, cfg *Config, repoPa
 	}
 
 	printResult(result)
+}
+
+// phaseDescription returns a human-readable description for each pipeline phase.
+func phaseDescription(phase string) string {
+	switch phase {
+	case "parsing":
+		return "Parsing files"
+	case "embedding":
+		return "Generating embeddings"
+	case "embedding_types":
+		return "Embedding types"
+	case "writing":
+		return "Writing to database"
+	default:
+		return phase
+	}
 }
 
 // mapEmbeddingProvider maps user-facing provider names to internal identifiers.
