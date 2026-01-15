@@ -29,6 +29,7 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/kraklabs/cie/internal/errors"
+	"github.com/kraklabs/cie/internal/ui"
 )
 
 // runInit executes the 'init' CLI command, creating a .cie/project.yaml configuration file.
@@ -207,14 +208,13 @@ func createInitConfig(cwd string, f initFlags) *Config {
 }
 
 func runInteractiveConfig(reader *bufio.Reader, cfg *Config) {
-	fmt.Println("CIE Project Configuration")
-	fmt.Println("=========================")
+	ui.Header("CIE Project Configuration")
 	fmt.Println()
 
 	cfg.ProjectID = prompt(reader, "Project ID", cfg.ProjectID)
 
 	fmt.Println()
-	fmt.Println("Embedding Providers: ollama, nomic, mock")
+	ui.Info("Embedding Providers: ollama, nomic, mock")
 	cfg.Embedding.Provider = prompt(reader, "Embedding provider", cfg.Embedding.Provider)
 	if cfg.Embedding.Provider == "ollama" {
 		cfg.Embedding.BaseURL = prompt(reader, "Ollama URL", cfg.Embedding.BaseURL)
@@ -227,9 +227,9 @@ func runInteractiveConfig(reader *bufio.Reader, cfg *Config) {
 
 func promptLLMConfig(reader *bufio.Reader, cfg *Config) {
 	fmt.Println()
-	fmt.Println("LLM Configuration (for analyze narratives)")
+	ui.SubHeader("LLM Configuration (for analyze narratives)")
 	fmt.Println("Configure an OpenAI-compatible LLM to generate narrative explanations.")
-	fmt.Println("Leave empty to skip LLM configuration.")
+	_, _ = ui.Dim.Println("Leave empty to skip LLM configuration.")
 	fmt.Println()
 
 	llmURLInput := prompt(reader, "LLM API URL (e.g., http://localhost:8001/v1)", cfg.LLM.BaseURL)
@@ -267,7 +267,7 @@ func saveInitConfig(cwd, configPath string, cfg *Config) {
 			err,
 		), false)
 	}
-	fmt.Printf("Created %s\n", configPath)
+	ui.Successf("Created %s", configPath)
 	addToGitignore(cwd)
 }
 
@@ -290,26 +290,26 @@ func handleHookInstallation(reader *bufio.Reader, f initFlags) {
 	}
 	gitDir, err := findGitDir()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: cannot find .git directory: %v\n", err)
+		ui.Warningf("cannot find .git directory: %v", err)
 		return
 	}
 	hookPath := filepath.Join(gitDir, "hooks", "post-commit")
 	if err := installHook(hookPath, false); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: cannot install git hook: %v\n", err)
+		ui.Warningf("cannot install git hook: %v", err)
 	} else {
-		fmt.Printf("Git hook installed: %s\n", hookPath)
+		ui.Successf("Git hook installed: %s", hookPath)
 	}
 }
 
 func printNextSteps(noHook bool) {
 	fmt.Println()
-	fmt.Println("Next steps:")
-	fmt.Println("  1. Review and edit .cie/project.yaml if needed")
-	fmt.Println("  2. Run 'cie index' to index your repository")
-	fmt.Println("  3. Run 'cie status' to verify indexing")
+	ui.SubHeader("Next steps:")
+	fmt.Printf("  1. Review and edit %s if needed\n", ui.DimText(".cie/project.yaml"))
+	fmt.Printf("  2. Run '%s' to index your repository\n", ui.Cyan.Sprint("cie index"))
+	fmt.Printf("  3. Run '%s' to verify indexing\n", ui.Cyan.Sprint("cie status"))
 	if noHook {
 		fmt.Println()
-		fmt.Println("Tip: Run 'cie install-hook' to enable auto-indexing on each commit")
+		ui.Infof("Tip: Run '%s' to enable auto-indexing on each commit", ui.Cyan.Sprint("cie install-hook"))
 	}
 }
 

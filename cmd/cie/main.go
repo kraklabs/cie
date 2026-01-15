@@ -33,6 +33,8 @@ import (
 	"os"
 
 	flag "github.com/spf13/pflag"
+
+	"github.com/kraklabs/cie/internal/ui"
 )
 
 // Version information (set via ldflags during build)
@@ -191,6 +193,9 @@ For detailed command help: cie <command> --help
 		Verbose: *verbose,
 		Quiet:   *quiet,
 	}
+
+	// Initialize color output based on flags
+	ui.InitColors(globals.NoColor)
 
 	// MCP mode takes precedence
 	if *mcpMode {

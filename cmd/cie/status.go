@@ -30,6 +30,7 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/kraklabs/cie/internal/errors"
+	"github.com/kraklabs/cie/internal/ui"
 	"github.com/kraklabs/cie/pkg/storage"
 )
 
@@ -136,8 +137,8 @@ Output Fields:
 		if globals.JSON {
 			outputStatusJSON(result)
 		} else {
-			fmt.Printf("Project '%s' not indexed yet.\n", cfg.ProjectID)
-			fmt.Println("Run 'cie index' to index the repository.")
+			ui.Warningf("Project '%s' not indexed yet.", cfg.ProjectID)
+			ui.Info("Run 'cie index' to index the repository.")
 		}
 		os.Exit(0)
 	}
@@ -223,20 +224,20 @@ func outputStatusJSON(result *StatusResult) {
 // Displays project information and entity counts in a human-readable format.
 // This is the default output when --json is not specified.
 func printLocalStatus(result *StatusResult) {
-	fmt.Println("CIE Project Status (Local)")
-	fmt.Println("==========================")
-	fmt.Printf("Project ID:    %s\n", result.ProjectID)
-	fmt.Printf("Data Dir:      %s\n", result.DataDir)
+	ui.Header("CIE Project Status (Local)")
+	fmt.Printf("%s    %s\n", ui.Label("Project ID:"), result.ProjectID)
+	fmt.Printf("%s      %s\n", ui.Label("Data Dir:"), ui.DimText(result.DataDir))
 	fmt.Println()
 
-	fmt.Println("Entities:")
-	fmt.Printf("  Files:         %d\n", result.Files)
-	fmt.Printf("  Functions:     %d\n", result.Functions)
-	fmt.Printf("  Types:         %d\n", result.Types)
-	fmt.Printf("  Embeddings:    %d\n", result.Embeddings)
-	fmt.Printf("  Call Edges:    %d\n", result.CallEdges)
+	ui.SubHeader("Entities:")
+	fmt.Printf("  Files:         %s\n", ui.CountText(result.Files))
+	fmt.Printf("  Functions:     %s\n", ui.CountText(result.Functions))
+	fmt.Printf("  Types:         %s\n", ui.CountText(result.Types))
+	fmt.Printf("  Embeddings:    %s\n", ui.CountText(result.Embeddings))
+	fmt.Printf("  Call Edges:    %s\n", ui.CountText(result.CallEdges))
 
 	if result.Error != "" {
-		fmt.Printf("\nWarning: %s\n", result.Error)
+		fmt.Println()
+		ui.Warning(result.Error)
 	}
 }

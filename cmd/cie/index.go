@@ -34,6 +34,7 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/kraklabs/cie/internal/errors"
+	"github.com/kraklabs/cie/internal/ui"
 	"github.com/kraklabs/cie/pkg/ingestion"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -381,49 +382,51 @@ func mapEmbeddingProvider(provider string) string {
 // and overall execution time. Used to provide user feedback after indexing completes.
 func printResult(result *ingestion.IngestionResult) {
 	fmt.Println()
-	fmt.Println("=== Indexing Complete ===")
-	fmt.Printf("Project ID: %s\n", result.ProjectID)
+	ui.Header("Indexing Complete")
+	fmt.Printf("%s %s\n", ui.Label("Project ID:"), result.ProjectID)
 
 	// Add progress indicators for file processing
-	fmt.Printf("Files Processed: %d ", result.FilesProcessed)
+	fmt.Printf("Files Processed: %s ", ui.CountText(result.FilesProcessed))
 	if result.ParseErrors > 0 {
 		successRate := 100.0 * (1.0 - result.ParseErrorRate)
-		fmt.Printf("(%.1f%% success rate)\n", successRate)
+		_, _ = ui.Yellow.Printf("(%.1f%% success rate)\n", successRate)
 	} else {
-		fmt.Println("✓")
+		_, _ = ui.Green.Println("✓")
 	}
 
-	fmt.Printf("Functions Extracted: %d\n", result.FunctionsExtracted)
-	fmt.Printf("Types Extracted: %d\n", result.TypesExtracted)
-	fmt.Printf("Defines Edges: %d\n", result.DefinesEdges)
-	fmt.Printf("Calls Edges: %d\n", result.CallsEdges)
-	fmt.Printf("Entities Written: %d\n", result.EntitiesSent)
+	fmt.Printf("Functions Extracted: %s\n", ui.CountText(result.FunctionsExtracted))
+	fmt.Printf("Types Extracted: %s\n", ui.CountText(result.TypesExtracted))
+	fmt.Printf("Defines Edges: %s\n", ui.CountText(result.DefinesEdges))
+	fmt.Printf("Calls Edges: %s\n", ui.CountText(result.CallsEdges))
+	fmt.Printf("Entities Written: %s\n", ui.CountText(result.EntitiesSent))
 
 	if result.ParseErrors > 0 {
-		fmt.Printf("Parse Errors: %d (%.2f%%)\n", result.ParseErrors, result.ParseErrorRate)
+		_, _ = ui.Yellow.Printf("Parse Errors: %d (%.2f%%)\n", result.ParseErrors, result.ParseErrorRate)
 	}
 	if result.EmbeddingErrors > 0 {
-		fmt.Printf("Embedding Errors: %d\n", result.EmbeddingErrors)
+		_, _ = ui.Yellow.Printf("Embedding Errors: %d\n", result.EmbeddingErrors)
 	}
 	if result.CodeTextTruncated > 0 {
-		fmt.Printf("CodeText Truncated: %d\n", result.CodeTextTruncated)
+		_, _ = ui.Dim.Printf("CodeText Truncated: %d\n", result.CodeTextTruncated)
 	}
 
 	if len(result.TopSkipReasons) > 0 {
-		fmt.Println("\nSkipped Files:")
+		fmt.Println()
+		ui.SubHeader("Skipped Files:")
 		for reason, count := range result.TopSkipReasons {
-			fmt.Printf("  %s: %d\n", reason, count)
+			fmt.Printf("  %s: %s\n", reason, ui.DimText(fmt.Sprintf("%d", count)))
 		}
 	}
 
-	fmt.Println("\nTimings:")
-	fmt.Printf("  Parse: %s\n", result.ParseDuration)
-	fmt.Printf("  Embed: %s\n", result.EmbedDuration)
-	fmt.Printf("  Write: %s\n", result.WriteDuration)
-	fmt.Printf("  Total: %s\n", result.TotalDuration)
+	fmt.Println()
+	ui.SubHeader("Timings:")
+	fmt.Printf("  Parse: %s\n", ui.DimText(result.ParseDuration.String()))
+	fmt.Printf("  Embed: %s\n", ui.DimText(result.EmbedDuration.String()))
+	fmt.Printf("  Write: %s\n", ui.DimText(result.WriteDuration.String()))
+	fmt.Printf("  Total: %s\n", ui.DimText(result.TotalDuration.String()))
 	fmt.Println()
 
 	// Show data location
 	homeDir, _ := os.UserHomeDir()
-	fmt.Printf("Data stored in: %s\n", filepath.Join(homeDir, ".cie", "data", result.ProjectID))
+	fmt.Printf("Data stored in: %s\n", ui.DimText(filepath.Join(homeDir, ".cie", "data", result.ProjectID)))
 }
