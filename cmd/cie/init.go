@@ -21,11 +21,12 @@ package main
 
 import (
 	"bufio"
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	flag "github.com/spf13/pflag"
 
 	"github.com/kraklabs/cie/internal/errors"
 )
@@ -65,7 +66,7 @@ type initFlags struct {
 	llmURL, llmModel, llmAPIKey             string
 }
 
-func runInit(args []string) {
+func runInit(args []string, globals GlobalFlags) {
 	flags := parseInitFlags(args)
 	applyServerIPDefaults(&flags)
 

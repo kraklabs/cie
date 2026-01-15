@@ -22,13 +22,14 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
+
+	flag "github.com/spf13/pflag"
 
 	"github.com/kraklabs/cie/internal/errors"
 	"github.com/kraklabs/cie/pkg/storage"
@@ -39,8 +40,11 @@ import (
 // It opens the local CozoDB database and executes the provided Datalog query, returning results
 // as either formatted tables (default) or JSON for programmatic use.
 //
-// Flags:
-//   - --json: Output results as JSON (default: false)
+// Global flags from main:
+//   - --json: Output results as JSON (from globals.JSON)
+//   - --quiet: Suppress non-essential output (from globals.Quiet)
+//
+// Command-specific flags:
 //   - --timeout: Query timeout duration (default: 30s)
 //   - --limit: Add :limit clause to query (default: 0, no limit)
 //
@@ -49,9 +53,8 @@ import (
 //	cie query '?[name, file] := *cie_function{ name, file_path: file } :limit 10'
 //	cie query '?[name] := *cie_function{ name }' --json
 //	cie query '?[count(id)] := *cie_function{ id }' --timeout 60s
-func runQuery(args []string, configPath string) {
+func runQuery(args []string, configPath string, globals GlobalFlags) {
 	fs := flag.NewFlagSet("query", flag.ExitOnError)
-	jsonOutput := fs.Bool("json", false, "Output as JSON")
 	timeout := fs.Duration("timeout", 30*time.Second, "Query timeout")
 	limit := fs.Int("limit", 0, "Add :limit to query (0 = no limit)")
 
@@ -106,7 +109,7 @@ Notes:
 			"Script argument required",
 			"No CozoScript query provided",
 			"Provide a query: cie query '?[name] := *cie_function{name}'",
-		), *jsonOutput)
+		), globals.JSON)
 	}
 
 	script := fs.Arg(0)
@@ -127,7 +130,7 @@ Notes:
 			"Configuration file is missing or invalid",
 			"Run 'cie init' to create a new configuration",
 			err,
-		), *jsonOutput)
+		), globals.JSON)
 	}
 
 	// Determine data directory
@@ -138,7 +141,7 @@ Notes:
 			"Operating system did not provide user home directory path",
 			"Check your system configuration or set HOME environment variable",
 			err,
-		), *jsonOutput)
+		), globals.JSON)
 	}
 	dataDir := filepath.Join(homeDir, ".cie", "data", cfg.ProjectID)
 
@@ -149,7 +152,7 @@ Notes:
 			"The CIE database does not exist for this project",
 			"Run 'cie index' to index the repository first",
 			err,
-		), *jsonOutput)
+		), globals.JSON)
 	}
 
 	// Open local backend
@@ -164,7 +167,7 @@ Notes:
 			"The database file may be corrupted or locked by another process",
 			"Try running 'cie status' to check database health, or 'cie reset' to rebuild",
 			err,
-		), *jsonOutput)
+		), globals.JSON)
 	}
 	defer func() { _ = backend.Close() }()
 
@@ -179,23 +182,23 @@ Notes:
 				"Invalid CozoScript query syntax",
 				fmt.Sprintf("Query parsing failed: %v", err),
 				"Check the CozoScript documentation or run 'cie query --help' for examples",
-			), *jsonOutput)
+			), globals.JSON)
 		}
 		errors.FatalError(errors.NewDatabaseError(
 			"Query execution failed",
 			fmt.Sprintf("Database returned an error: %v", err),
 			"Check your query syntax and ensure the database is not corrupted",
 			err,
-		), *jsonOutput)
+		), globals.JSON)
 	}
 
 	// Warn about empty results in non-JSON mode
-	if len(result.Rows) == 0 && !*jsonOutput {
+	if len(result.Rows) == 0 && !globals.JSON {
 		fmt.Fprintf(os.Stderr, "Warning: Query returned no results\n")
 		fmt.Fprintf(os.Stderr, "Hint: Try broadening your query or verify the database is indexed with 'cie status'\n")
 	}
 
-	if *jsonOutput {
+	if globals.JSON {
 		outputQueryJSON(result)
 	} else {
 		printQueryResult(result)

@@ -21,7 +21,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -30,6 +29,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+
+	flag "github.com/spf13/pflag"
 
 	"github.com/kraklabs/cie/internal/errors"
 	"github.com/kraklabs/cie/pkg/ingestion"
@@ -54,7 +55,7 @@ import (
 //	cie index                  Incremental index (only changed files)
 //	cie index --full           Force full reindex
 //	cie index --embed-workers 16  Use 16 parallel workers for embeddings
-func runIndex(args []string, configPath string) {
+func runIndex(args []string, configPath string, globals GlobalFlags) {
 	fs := flag.NewFlagSet("index", flag.ExitOnError)
 	full := fs.Bool("full", false, "Force full reindex")
 	forceFullReindex := fs.Bool("force-full-reindex", false, "Delete checkpoint and reindex everything from scratch")

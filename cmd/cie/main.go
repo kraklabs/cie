@@ -29,9 +29,10 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"os"
+
+	flag "github.com/spf13/pflag"
 )
 
 // Version information (set via ldflags during build)
@@ -40,6 +41,38 @@ var (
 	commit  = "unknown" // Git commit hash
 	date    = "unknown" // Build date
 )
+
+// GlobalFlags holds the global CLI flags that apply to all commands.
+type GlobalFlags struct {
+	JSON     bool // Output in JSON format (for applicable commands)
+	NoColor  bool // Disable color output
+	Verbose  int  // Verbosity level: 0=normal, 1=-v (info), 2=-vv (debug)
+	Quiet    bool // Suppress non-essential output (progress, info messages)
+}
+
+// logInfo outputs an informational message to stderr if verbose mode is enabled.
+// Messages are suppressed if quiet mode is active.
+func logInfo(globals GlobalFlags, format string, args ...interface{}) {
+	if !globals.Quiet && globals.Verbose >= 1 {
+		fmt.Fprintf(os.Stderr, "[INFO] "+format+"\n", args...)
+	}
+}
+
+// logDebug outputs a debug message to stderr if debug verbosity is enabled (-vv).
+// Debug messages are shown regardless of quiet mode for troubleshooting.
+func logDebug(globals GlobalFlags, format string, args ...interface{}) {
+	if globals.Verbose >= 2 {
+		fmt.Fprintf(os.Stderr, "[DEBUG] "+format+"\n", args...)
+	}
+}
+
+// logError outputs an error message to stderr unless quiet mode is active.
+// Note: Fatal errors should still use errors.FatalError() which handles quiet mode.
+func logError(globals GlobalFlags, format string, args ...interface{}) {
+	if !globals.Quiet {
+		fmt.Fprintf(os.Stderr, "[ERROR] "+format+"\n", args...)
+	}
+}
 
 // main is the entry point for the CIE CLI.
 //
@@ -58,11 +91,15 @@ var (
 //   - reset: Reset local project data (destructive!)
 //   - install-hook: Install git post-commit hook for auto-indexing
 func main() {
-	// Global flags
+	// Global flags with short forms
 	var (
-		showVersion = flag.Bool("version", false, "Show version and exit")
+		showVersion = flag.BoolP("version", "V", false, "Show version and exit")
 		mcpMode     = flag.Bool("mcp", false, "Start as MCP server (JSON-RPC over stdio)")
-		configPath  = flag.String("config", "", "Path to .cie/project.yaml (default: ./.cie/project.yaml)")
+		configPath  = flag.StringP("config", "c", "", "Path to .cie/project.yaml (default: ./.cie/project.yaml)")
+		jsonOutput  = flag.Bool("json", false, "Output in JSON format (for applicable commands)")
+		noColor     = flag.Bool("no-color", false, "Disable color output")
+		verbose     = flag.CountP("verbose", "v", "Increase verbosity (-v for info, -vv for debug)")
+		quiet       = flag.BoolP("quiet", "q", false, "Suppress non-essential output (progress, info messages)")
 	)
 
 	flag.Usage = func() {
@@ -86,9 +123,13 @@ Commands:
   completion    Generate shell completion script (bash|zsh|fish)
 
 Global Options:
-  --mcp         Start as MCP server (JSON-RPC over stdio)
-  --config      Path to .cie/project.yaml
-  --version     Show version and exit
+  --json            Output in JSON format (for applicable commands)
+  --no-color        Disable color output (respects NO_COLOR env var)
+  -v, --verbose     Increase verbosity (-v for info, -vv for debug)
+  -q, --quiet       Suppress non-essential output (progress, info messages)
+  --mcp             Start as MCP server (JSON-RPC over stdio)
+  -c, --config      Path to .cie/project.yaml
+  -V, --version     Show version and exit
 
 Examples:
   cie init                           Create configuration interactively
@@ -127,6 +168,30 @@ For detailed command help: cie <command> --help
 		os.Exit(0)
 	}
 
+	// Check NO_COLOR environment variable
+	if os.Getenv("NO_COLOR") != "" {
+		*noColor = true
+	}
+
+	// Validate conflicting flags
+	if *quiet && *verbose > 0 {
+		fmt.Fprintf(os.Stderr, "Error: cannot use --quiet and --verbose together\n")
+		os.Exit(1)
+	}
+
+	// JSON mode auto-enables quiet to prevent progress bars corrupting JSON output
+	if *jsonOutput {
+		*quiet = true
+	}
+
+	// Build GlobalFlags struct
+	globals := GlobalFlags{
+		JSON:    *jsonOutput,
+		NoColor: *noColor,
+		Verbose: *verbose,
+		Quiet:   *quiet,
+	}
+
 	// MCP mode takes precedence
 	if *mcpMode {
 		runMCPServer(*configPath)
@@ -144,19 +209,19 @@ For detailed command help: cie <command> --help
 
 	switch command {
 	case "init":
-		runInit(cmdArgs)
+		runInit(cmdArgs, globals)
 	case "index":
-		runIndex(cmdArgs, *configPath)
+		runIndex(cmdArgs, *configPath, globals)
 	case "status":
-		runStatus(cmdArgs, *configPath)
+		runStatus(cmdArgs, *configPath, globals)
 	case "query":
-		runQuery(cmdArgs, *configPath)
+		runQuery(cmdArgs, *configPath, globals)
 	case "reset":
-		runReset(cmdArgs, *configPath)
+		runReset(cmdArgs, *configPath, globals)
 	case "install-hook":
-		runInstallHook(cmdArgs, *configPath)
+		runInstallHook(cmdArgs, *configPath, globals)
 	case "completion":
-		runCompletion(cmdArgs, *configPath)
+		runCompletion(cmdArgs, *configPath, globals)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", command)
 		flag.Usage()

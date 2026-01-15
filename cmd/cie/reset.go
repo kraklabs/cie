@@ -20,10 +20,11 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
+
+	flag "github.com/spf13/pflag"
 
 	"github.com/kraklabs/cie/internal/errors"
 )
@@ -41,7 +42,7 @@ import (
 // Examples:
 //
 //	cie reset --yes    Delete all local data (destructive!)
-func runReset(args []string, configPath string) {
+func runReset(args []string, configPath string, globals GlobalFlags) {
 	fs := flag.NewFlagSet("reset", flag.ExitOnError)
 	confirm := fs.Bool("yes", false, "Confirm the reset (required)")
 

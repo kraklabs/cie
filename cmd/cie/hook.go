@@ -20,10 +20,11 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
+
+	flag "github.com/spf13/pflag"
 
 	"github.com/kraklabs/cie/internal/errors"
 )
@@ -52,7 +53,7 @@ cie index --incremental --until="$COMMIT" --skip-checks --queue 2>/dev/null &
 //	cie install-hook           Install the post-commit hook
 //	cie install-hook --force   Overwrite existing hook
 //	cie install-hook --remove  Remove the hook
-func runInstallHook(args []string, configPath string) {
+func runInstallHook(args []string, configPath string, globals GlobalFlags) {
 	fs := flag.NewFlagSet("install-hook", flag.ExitOnError)
 	force := fs.Bool("force", false, "Overwrite existing hook")
 	remove := fs.Bool("remove", false, "Remove the hook instead of installing")

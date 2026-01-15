@@ -22,11 +22,12 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
+
+	flag "github.com/spf13/pflag"
 
 	"github.com/kraklabs/cie/internal/errors"
 	"github.com/kraklabs/cie/pkg/storage"
@@ -52,16 +53,16 @@ type StatusResult struct {
 // embeddings, and call graph edges. This helps users verify that indexing completed
 // successfully and understand the scope of their indexed codebase.
 //
-// Flags:
-//   - --json: Output results as JSON (default: false)
+// Global flags from main:
+//   - --json: Output results as JSON (from globals.JSON)
+//   - --quiet: Suppress non-essential output (from globals.Quiet)
 //
 // Examples:
 //
 //	cie status           Display formatted status
 //	cie status --json    Output as JSON for programmatic use
-func runStatus(args []string, configPath string) {
+func runStatus(args []string, configPath string, globals GlobalFlags) {
 	fs := flag.NewFlagSet("status", flag.ExitOnError)
-	jsonOutput := fs.Bool("json", false, "Output as JSON")
 
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `Usage: cie status [options]
@@ -107,7 +108,7 @@ Output Fields:
 	// Load configuration
 	cfg, err := LoadConfig(configPath)
 	if err != nil {
-		errors.FatalError(err, *jsonOutput) // LoadConfig returns UserError
+		errors.FatalError(err, globals.JSON) // LoadConfig returns UserError
 	}
 
 	// Determine data directory
@@ -118,7 +119,7 @@ Output Fields:
 			"Operating system failed to provide user home directory path",
 			"Check your system configuration or set the HOME environment variable",
 			err,
-		), *jsonOutput)
+		), globals.JSON)
 	}
 	dataDir := filepath.Join(homeDir, ".cie", "data", cfg.ProjectID)
 
@@ -132,7 +133,7 @@ Output Fields:
 	if _, err := os.Stat(dataDir); os.IsNotExist(err) {
 		result.Connected = false
 		result.Error = "Project not indexed yet. Run 'cie index' first."
-		if *jsonOutput {
+		if globals.JSON {
 			outputStatusJSON(result)
 		} else {
 			fmt.Printf("Project '%s' not indexed yet.\n", cfg.ProjectID)
@@ -153,7 +154,7 @@ Output Fields:
 			"The database file may be corrupted, locked by another process, or permission denied",
 			"Try running 'cie status' again, or run 'cie reset --yes' to rebuild the index",
 			err,
-		), *jsonOutput)
+		), globals.JSON)
 	}
 	defer func() { _ = backend.Close() }()
 
@@ -167,7 +168,7 @@ Output Fields:
 	result.Embeddings = queryLocalCount(ctx, backend, "cie_function_embedding", "function_id")
 	result.CallEdges = queryLocalCount(ctx, backend, "cie_calls", "id")
 
-	if *jsonOutput {
+	if globals.JSON {
 		outputStatusJSON(result)
 	} else {
 		printLocalStatus(result)

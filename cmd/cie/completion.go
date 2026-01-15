@@ -20,9 +20,10 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"os"
+
+	flag "github.com/spf13/pflag"
 
 	"github.com/kraklabs/cie/internal/errors"
 )
@@ -47,9 +48,9 @@ _cie_completion() {
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-    # Global flags
+    # Global flags (including short forms)
     if [[ ${cur} == -* ]] ; then
-        COMPREPLY=( $(compgen -W "--version --mcp --config" -- ${cur}) )
+        COMPREPLY=( $(compgen -W "-V --version --mcp -c --config --json --no-color -v --verbose -q --quiet" -- ${cur}) )
         return 0
     fi
 
@@ -68,13 +69,11 @@ _cie_completion() {
             fi
             ;;
         status)
-            if [[ ${cur} == -* ]] ; then
-                COMPREPLY=( $(compgen -W "--json" -- ${cur}) )
-            fi
+            # No command-specific flags (uses global --json)
             ;;
         query)
             if [[ ${cur} == -* ]] ; then
-                COMPREPLY=( $(compgen -W "--json" -- ${cur}) )
+                COMPREPLY=( $(compgen -W "--timeout --limit" -- ${cur}) )
             fi
             ;;
         reset)
@@ -127,9 +126,13 @@ _cie() {
     )
 
     _arguments -C \
-        '(- *)--version[Show version and exit]' \
+        '(- *){-V,--version}[Show version and exit]' \
         '--mcp[Start as MCP server (JSON-RPC over stdio)]' \
-        '--config[Path to .cie/project.yaml]:config file:_files -g "*.yaml"' \
+        '(-c --config)'{-c,--config}'[Path to .cie/project.yaml]:config file:_files -g "*.yaml"' \
+        '--json[Output in JSON format]' \
+        '--no-color[Disable color output]' \
+        '(-v --verbose)'{-v,--verbose}'[Increase verbosity (-v info, -vv debug)]' \
+        '(-q --quiet)'{-q,--quiet}'[Suppress non-essential output]' \
         '1: :->command' \
         '*:: :->args'
 
@@ -148,12 +151,12 @@ _cie() {
                         '--metrics-addr[Prometheus metrics address]:address:'
                     ;;
                 status)
-                    _arguments \
-                        '--json[Output as JSON]'
+                    # No command-specific flags (uses global --json)
                     ;;
                 query)
                     _arguments \
-                        '--json[Output as JSON]' \
+                        '--timeout[Query timeout duration]:duration:' \
+                        '--limit[Add :limit to query]:limit:' \
                         '1:cozoscript query:'
                     ;;
                 reset)
@@ -197,10 +200,14 @@ complete -c cie -f -n "__fish_use_subcommand" -a "reset" -d "Reset local project
 complete -c cie -f -n "__fish_use_subcommand" -a "install-hook" -d "Install git post-commit hook"
 complete -c cie -f -n "__fish_use_subcommand" -a "completion" -d "Generate shell completion script"
 
-# Global flags
-complete -c cie -l version -d "Show version and exit"
+# Global flags (with short forms)
+complete -c cie -s V -l version -d "Show version and exit"
 complete -c cie -l mcp -d "Start as MCP server (JSON-RPC over stdio)"
-complete -c cie -l config -d "Path to .cie/project.yaml" -r
+complete -c cie -s c -l config -d "Path to .cie/project.yaml" -r
+complete -c cie -l json -d "Output in JSON format"
+complete -c cie -l no-color -d "Disable color output"
+complete -c cie -s v -l verbose -d "Increase verbosity (-v info, -vv debug)"
+complete -c cie -s q -l quiet -d "Suppress non-essential output"
 
 # index command flags
 complete -c cie -n "__fish_seen_subcommand_from index" -l full -d "Force full re-index (ignore incremental)"
@@ -210,10 +217,11 @@ complete -c cie -n "__fish_seen_subcommand_from index" -l debug -d "Enable debug
 complete -c cie -n "__fish_seen_subcommand_from index" -l metrics-addr -d "Prometheus metrics address" -r
 
 # status command flags
-complete -c cie -n "__fish_seen_subcommand_from status" -l json -d "Output as JSON"
+# (uses global --json flag)
 
 # query command flags
-complete -c cie -n "__fish_seen_subcommand_from query" -l json -d "Output as JSON"
+complete -c cie -n "__fish_seen_subcommand_from query" -l timeout -d "Query timeout duration" -r
+complete -c cie -n "__fish_seen_subcommand_from query" -l limit -d "Add :limit to query" -r
 
 # reset command flags
 complete -c cie -n "__fish_seen_subcommand_from reset" -l yes -d "Skip confirmation prompt"
@@ -247,7 +255,7 @@ complete -c cie -n "__fish_seen_subcommand_from completion" -f -a "fish" -d "Gen
 //	cie completion fish | source            Load fish completions in current shell
 //
 // Installation instructions are provided in the help text for each shell.
-func runCompletion(args []string, configPath string) {
+func runCompletion(args []string, configPath string, globals GlobalFlags) {
 	fs := flag.NewFlagSet("completion", flag.ExitOnError)
 
 	fs.Usage = func() {
