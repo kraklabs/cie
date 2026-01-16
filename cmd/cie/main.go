@@ -104,6 +104,12 @@ func main() {
 		quiet       = flag.BoolP("quiet", "q", false, "Suppress non-essential output (progress, info messages)")
 	)
 
+	// Stop parsing at the first non-flag argument (the command name).
+	// This allows subcommand-specific flags like "reset --yes" or "init -y"
+	// to be passed through to subcommand handlers instead of being rejected
+	// by the global flag parser.
+	flag.SetInterspersed(false)
+
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, `CIE - Code Intelligence Engine
 
@@ -119,6 +125,7 @@ Commands:
   init          Create .cie/project.yaml configuration
   index         Index the current repository
   status        Show project status
+  config        Show current configuration
   query         Execute CozoScript query
   reset         Reset local project data (destructive!)
   install-hook  Install git post-commit hook for auto-indexing
@@ -139,6 +146,7 @@ Examples:
   cie index --full                   Force full re-index
   cie status                         Show project status
   cie status --json                  Output as JSON (for MCP)
+  cie config --json                  Show configuration as JSON
   cie query "?[name] := *cie_function{name}"
   cie completion bash                Generate bash completion script
   cie --mcp                          Start as MCP server
@@ -219,6 +227,8 @@ For detailed command help: cie <command> --help
 		runIndex(cmdArgs, *configPath, globals)
 	case "status":
 		runStatus(cmdArgs, *configPath, globals)
+	case "config":
+		runConfig(cmdArgs, *configPath, globals)
 	case "query":
 		runQuery(cmdArgs, *configPath, globals)
 	case "reset":

@@ -106,7 +106,7 @@ func parseInitFlags(args []string) initFlags {
 	fs := flag.NewFlagSet("init", flag.ExitOnError)
 	var f initFlags
 	fs.BoolVar(&f.force, "force", false, "Overwrite existing configuration")
-	fs.BoolVar(&f.nonInteractive, "y", false, "Non-interactive mode (use defaults)")
+	fs.BoolVarP(&f.nonInteractive, "yes", "y", false, "Non-interactive mode (use defaults)")
 	fs.StringVar(&f.projectID, "project-id", "", "Project identifier")
 	fs.StringVar(&f.serverIP, "ip", "", "CIE server IP (sets edge-cache to http://IP:30080 and primary-hub to IP:30051)")
 	fs.StringVar(&f.edgeCache, "edge-cache", "", "Edge Cache URL (overrides --ip)")
