@@ -2,10 +2,10 @@
   <h1>🦑 CIE - Code Intelligence Engine</h1>
   <p><strong>Give your AI assistant deep understanding of your codebase</strong></p>
 
-  [![CI](https://github.com/kraklabs/kraken/actions/workflows/build-cie.yaml/badge.svg)](https://github.com/kraklabs/kraken/actions/workflows/build-cie.yaml)
-  [![codecov](https://codecov.io/gh/kraklabs/kraken/branch/main/graph/badge.svg?flag=cie)](https://codecov.io/gh/kraklabs/kraken)
-  [![Go Report Card](https://goreportcard.com/badge/github.com/kraklabs/kraken)](https://goreportcard.com/report/github.com/kraklabs/kraken)
-  [![Go Version](https://img.shields.io/github/go-mod/go-version/kraklabs/kraken)](go.mod)
+  [![CI](https://github.com/kraklabs/cie/actions/workflows/ci.yml/badge.svg)](https://github.com/kraklabs/cie/actions/workflows/ci.yml)
+  [![codecov](https://codecov.io/gh/kraklabs/cie/branch/main/graph/badge.svg)](https://codecov.io/gh/kraklabs/cie)
+  [![Go Report Card](https://goreportcard.com/badge/github.com/kraklabs/cie)](https://goreportcard.com/report/github.com/kraklabs/cie)
+  [![Go Version](https://img.shields.io/github/go-mod/go-version/kraklabs/cie)](go.mod)
   [![License](https://img.shields.io/badge/license-AGPL%20v3-blue.svg)](LICENSE)
 
   <p>
@@ -112,14 +112,14 @@ See [CozoDB releases](https://github.com/cozodb/cozo/releases) for DLL installat
 
 ```bash
 # Install from source
-git clone https://github.com/kraklabs/kraken.git
+git clone https://github.com/kraklabs/cie.git
 cd kraken/modules/cie
 
 # Build
 make build
 
 # Or install directly with go
-go install github.com/kraklabs/kraken/modules/cie/cmd/cie@latest
+go install github.com/kraklabs/cie/modules/cie/cmd/cie@latest
 ```
 
 > **Note:** CIE is part of the Kraken monorepo. A standalone package is planned for easier installation.
@@ -290,6 +290,7 @@ CIE supports multiple embedding providers:
 | [MCP Integration](docs/mcp-integration.md) | Setting up with Claude Code, Cursor _(Coming soon)_ |
 | [Testing Guide](docs/testing.md) | Running tests and adding new tests ✅ |
 | [Benchmarks](docs/benchmarks.md) | Performance data and tuning ✅ |
+| [Exit Codes](docs/exit-codes.md) | CLI exit codes for scripting ✅ |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and solutions _(Coming soon)_ |
 
 ## Architecture
@@ -410,13 +411,13 @@ make lint
 Need help or want to contribute?
 
 - 📖 **Documentation**: [docs/](docs/)
-- 🐛 **Report Issues**: [GitHub Issues](https://github.com/kraklabs/kraken/issues/new?labels=cie)
-- 💬 **Discussions**: [GitHub Discussions](https://github.com/kraklabs/kraken/discussions)
+- 🐛 **Report Issues**: [GitHub Issues](https://github.com/kraklabs/cie/issues/new?labels=cie)
+- 💬 **Discussions**: [GitHub Discussions](https://github.com/kraklabs/cie/discussions)
 - 📧 **Email**: support@kraklabs.com
 
 **Before opening an issue:**
 1. Check the [troubleshooting guide](docs/troubleshooting.md) _(Coming soon)_
-2. Search [existing issues](https://github.com/kraklabs/kraken/issues?q=label%3Acie)
+2. Search [existing issues](https://github.com/kraklabs/cie/issues?q=label%3Acie)
 3. Include CIE version: `cie --version`
 4. Provide minimal reproduction steps
 
