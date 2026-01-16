@@ -1,0 +1,342 @@
+{
+	"Golang errors": {},
+	"Issues": [
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "190",
+				"url": "https://cwe.mitre.org/data/definitions/190.html"
+			},
+			"rule_id": "G115",
+			"details": "integer overflow conversion int64 -\u003e uint64",
+			"file": "/Users/francisco/code/kraklabs/kraken/modules/cie/pkg/ingestion/project_meta.go",
+			"code": "78: \tcase int64:\n79: \t\tmeta.LastCommittedIndex = uint64(v) //nolint:gosec // G115: DB stores non-negative index values\n80: \tcase int:\n",
+			"line": "79",
+			"column": "35",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "190",
+				"url": "https://cwe.mitre.org/data/definitions/190.html"
+			},
+			"rule_id": "G115",
+			"details": "integer overflow conversion int -\u003e uint64",
+			"file": "/Users/francisco/code/kraklabs/kraken/modules/cie/pkg/ingestion/project_meta.go",
+			"code": "80: \tcase int:\n81: \t\tmeta.LastCommittedIndex = uint64(v) //nolint:gosec // G115: DB stores non-negative index values\n82: \tcase string:\n",
+			"line": "81",
+			"column": "35",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "190",
+				"url": "https://cwe.mitre.org/data/definitions/190.html"
+			},
+			"rule_id": "G115",
+			"details": "integer overflow conversion int -\u003e uint64",
+			"file": "/Users/francisco/code/kraklabs/kraken/modules/cie/pkg/ingestion/embedding.go",
+			"code": "71: \t\t// Use hash to generate pseudo-random values\n72: \t\tval := float32((hash+uint64(i)*7919)%10000) / 10000.0 //nolint:gosec // G115: i is bounded by dimension (small constant)\n73: \t\tembedding[i] = val*2.0 - 1.0                          // Map to [-1, 1]\n",
+			"line": "72",
+			"column": "30",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "190",
+				"url": "https://cwe.mitre.org/data/definitions/190.html"
+			},
+			"rule_id": "G115",
+			"details": "integer overflow conversion int -\u003e uint64",
+			"file": "/Users/francisco/Library/Caches/go-build/45/457da032c690b8f9280d82004f207dcfd5bb4c8f327fd67a1e5a6409355c8538-d",
+			"code": "77: \t}\n78: \tp := _cgo_cmalloc(uint64(len(s)+1))\n79: \tsliceHeader := struct {\n",
+			"line": "78",
+			"column": "26",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "190",
+				"url": "https://cwe.mitre.org/data/definitions/190.html"
+			},
+			"rule_id": "G115",
+			"details": "integer overflow conversion int -\u003e uint32",
+			"file": "/Users/francisco/code/kraklabs/kraken/modules/cie/pkg/ingestion/parser_python.go",
+			"code": "224: \n225: \tfnNode := findNodeAtPosition(root, uint32(caller.StartLine-1), uint32(caller.StartCol-1)) //nolint:gosec // G115: line/col from parsed source are bounded\n226: \tif fnNode == nil {\n",
+			"line": "225",
+			"column": "71",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "190",
+				"url": "https://cwe.mitre.org/data/definitions/190.html"
+			},
+			"rule_id": "G115",
+			"details": "integer overflow conversion int -\u003e uint32",
+			"file": "/Users/francisco/code/kraklabs/kraken/modules/cie/pkg/ingestion/parser_python.go",
+			"code": "224: \n225: \tfnNode := findNodeAtPosition(root, uint32(caller.StartLine-1), uint32(caller.StartCol-1)) //nolint:gosec // G115: line/col from parsed source are bounded\n226: \tif fnNode == nil {\n",
+			"line": "225",
+			"column": "43",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "190",
+				"url": "https://cwe.mitre.org/data/definitions/190.html"
+			},
+			"rule_id": "G115",
+			"details": "integer overflow conversion int -\u003e uint32",
+			"file": "/Users/francisco/code/kraklabs/kraken/modules/cie/pkg/ingestion/parser_javascript.go",
+			"code": "322: \n323: \tfnNode := findNodeAtPosition(root, uint32(caller.StartLine-1), uint32(caller.StartCol-1)) //nolint:gosec // G115: line/col from parsed source are bounded\n324: \tif fnNode == nil {\n",
+			"line": "323",
+			"column": "71",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "190",
+				"url": "https://cwe.mitre.org/data/definitions/190.html"
+			},
+			"rule_id": "G115",
+			"details": "integer overflow conversion int -\u003e uint32",
+			"file": "/Users/francisco/code/kraklabs/kraken/modules/cie/pkg/ingestion/parser_javascript.go",
+			"code": "322: \n323: \tfnNode := findNodeAtPosition(root, uint32(caller.StartLine-1), uint32(caller.StartCol-1)) //nolint:gosec // G115: line/col from parsed source are bounded\n324: \tif fnNode == nil {\n",
+			"line": "323",
+			"column": "43",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/francisco/code/kraklabs/kraken/modules/cie/pkg/ingestion/manifest.go",
+			"code": "455: \n456: \tdata, err := os.ReadFile(path) //nolint:gosec // G304: path from manifest manager\n457: \tif err != nil {\n",
+			"line": "456",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null,
+			"autofix": "Consider using os.Root to scope file access under a fixed root (Go \u003e=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal."
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/francisco/code/kraklabs/kraken/modules/cie/pkg/ingestion/delta.go",
+			"code": "381: func isBinaryFile(fullPath string) bool {\n382: \tf, err := os.Open(fullPath) //nolint:gosec // G304: path validated by caller\n383: \tif err != nil {\n",
+			"line": "382",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null,
+			"autofix": "Consider using os.Root to scope file access under a fixed root (Go \u003e=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal."
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/francisco/code/kraklabs/kraken/modules/cie/pkg/ingestion/checkpoint.go",
+			"code": "95: \n96: \tdata, err := os.ReadFile(path) //nolint:gosec // G304: path from checkpoint manager\n97: \tif err != nil {\n",
+			"line": "96",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null,
+			"autofix": "Consider using os.Root to scope file access under a fixed root (Go \u003e=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal."
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/francisco/code/kraklabs/kraken/modules/cie/cmd/cie/init.go",
+			"code": "375: \t// Append .cie/ to .gitignore\n376: \tf, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_WRONLY, 0600) //nolint:gosec // G304: gitignorePath built from repo dir\n377: \tif err != nil {\n",
+			"line": "376",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null,
+			"autofix": "Consider using os.Root to scope file access under a fixed root (Go \u003e=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal."
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/francisco/code/kraklabs/kraken/modules/cie/cmd/cie/init.go",
+			"code": "356: \t// Check if .gitignore exists\n357: \tcontent, err := os.ReadFile(gitignorePath) //nolint:gosec // G304: gitignorePath built from repo dir\n358: \tif err != nil {\n",
+			"line": "357",
+			"column": "18",
+			"nosec": false,
+			"suppressions": null,
+			"autofix": "Consider using os.Root to scope file access under a fixed root (Go \u003e=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal."
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/francisco/code/kraklabs/kraken/modules/cie/cmd/cie/hook.go",
+			"code": "312: \thookPath := filepath.Join(gitDir, \"hooks\", \"post-commit\")\n313: \tcontent, err := os.ReadFile(hookPath) //nolint:gosec // G304: hookPath from git dir discovery\n314: \tif err != nil {\n",
+			"line": "313",
+			"column": "18",
+			"nosec": false,
+			"suppressions": null,
+			"autofix": "Consider using os.Root to scope file access under a fixed root (Go \u003e=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal."
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/francisco/code/kraklabs/kraken/modules/cie/cmd/cie/hook.go",
+			"code": "244: \t// Check if hook exists\n245: \tcontent, err := os.ReadFile(hookPath) //nolint:gosec // G304: hookPath from user's git repo\n246: \tif err != nil {\n",
+			"line": "245",
+			"column": "18",
+			"nosec": false,
+			"suppressions": null,
+			"autofix": "Consider using os.Root to scope file access under a fixed root (Go \u003e=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal."
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/francisco/code/kraklabs/kraken/modules/cie/cmd/cie/hook.go",
+			"code": "206: \t\t\t// Check if it's our hook\n207: \t\t\tcontent, err := os.ReadFile(hookPath) //nolint:gosec // G304: hookPath from user's git repo\n208: \t\t\tif err == nil \u0026\u0026 containsCIEMarker(string(content)) {\n",
+			"line": "207",
+			"column": "20",
+			"nosec": false,
+			"suppressions": null,
+			"autofix": "Consider using os.Root to scope file access under a fixed root (Go \u003e=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal."
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/francisco/code/kraklabs/kraken/modules/cie/cmd/cie/hook.go",
+			"code": "146: \t\t\t// .git is a file (worktree), read its contents\n147: \t\t\tcontent, err := os.ReadFile(gitPath) //nolint:gosec // G304: gitPath is constructed from CWD\n148: \t\t\tif err != nil {\n",
+			"line": "147",
+			"column": "20",
+			"nosec": false,
+			"suppressions": null,
+			"autofix": "Consider using os.Root to scope file access under a fixed root (Go \u003e=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal."
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/Users/francisco/code/kraklabs/kraken/modules/cie/cmd/cie/config.go",
+			"code": "167: \n168: \tdata, err := os.ReadFile(configPath) //nolint:gosec // G304: Path comes from user config or discovery\n169: \tif err != nil {\n",
+			"line": "168",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null,
+			"autofix": "Consider using os.Root to scope file access under a fixed root (Go \u003e=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal."
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G306",
+			"details": "Expect WriteFile permissions to be 0600 or less",
+			"file": "/Users/francisco/code/kraklabs/kraken/modules/cie/cmd/cie/hook.go",
+			"code": "220: \t// Write the hook (needs exec permission)\n221: \tif err := os.WriteFile(hookPath, []byte(postCommitHookContent), 0750); err != nil { //nolint:gosec // G306: Hook needs exec permission\n222: \t\treturn errors.NewPermissionError(\n",
+			"line": "221",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/Users/francisco/code/kraklabs/kraken/modules/cie/internal/testing/helpers.go",
+			"code": "66: \tt.Cleanup(func() {\n67: \t\tbackend.Close()\n68: \t})\n",
+			"line": "67",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		}
+	],
+	"Stats": {
+		"files": 70,
+		"lines": 24025,
+		"nosec": 1,
+		"found": 20
+	},
+	"GosecVersion": "dev"
+}
