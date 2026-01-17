@@ -249,7 +249,7 @@ func TestPythonParser_EdgeCases(t *testing.T) {
 			name:      "syntax error",
 			file:      "testdata/python/syntax_error.py",
 			wantErr:   false, // Parser should tolerate errors
-			wantFns:   0,     // May not extract functions
+			wantFns:   1,     // Tree-sitter still extracts partial functions from malformed code
 			wantTypes: 0,
 		},
 	}

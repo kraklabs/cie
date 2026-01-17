@@ -316,7 +316,7 @@ func TestGoParser_EdgeCases(t *testing.T) {
 			name:      "syntax error",
 			file:      "testdata/go/syntax_error.go",
 			wantErr:   false, // Parser should tolerate errors
-			wantFns:   0,     // May not extract any functions due to errors
+			wantFns:   2,     // Tree-sitter still extracts partial functions from malformed code
 			wantTypes: 0,
 		},
 	}
