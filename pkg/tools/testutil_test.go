@@ -163,7 +163,7 @@ func createTestFunction(name, file string, line int) FunctionInfo {
 // Example:
 //
 //	fn := createTestFunctionWithCode("Parse", "/pkg/parser.go", 10, "func Parse() error { return nil }")
-func createTestFunctionWithCode(name, file string, line int, code string) FunctionInfo {
+func createTestFunctionWithCode(name, file string, line int, code string) FunctionInfo { //nolint:unused // Test helper for future use
 	return FunctionInfo{
 		ID:        fmt.Sprintf("func_%s", name),
 		Name:      name,
@@ -232,7 +232,7 @@ func createTestSearchResult(names []string, paths []string) *QueryResult {
 //	        {CallerName: "Init", CallerFile: "/init.go", CallerLine: 5, CalleeName: "Setup"},
 //	    },
 //	)
-func createTestCallerResult(callers []CallerInfo) *QueryResult {
+func createTestCallerResult(callers []CallerInfo) *QueryResult { //nolint:unused // Test helper for future use
 	headers := []string{"caller_name", "caller_file", "caller_line", "callee_name"}
 	rows := make([][]any, len(callers))
 	for i, c := range callers {
@@ -254,7 +254,7 @@ func createTestCallerResult(callers []CallerInfo) *QueryResult {
 //	        {ID: "file2", Path: "/util.go", Language: "go", Size: 512},
 //	    },
 //	)
-func createTestFileResult(files []FileInfo) *QueryResult {
+func createTestFileResult(files []FileInfo) *QueryResult { //nolint:unused // Test helper for future use
 	headers := []string{"id", "path", "language", "size"}
 	rows := make([][]any, len(files))
 	for i, f := range files {

@@ -82,6 +82,9 @@ func TestFindTypeArgs_Defaults(t *testing.T) {
 		Name: "Handler",
 	}
 
+	if args.Name != "Handler" {
+		t.Errorf("Name should be set, got %q", args.Name)
+	}
 	if args.Kind != "" {
 		t.Errorf("Default Kind should be empty, got %q", args.Kind)
 	}

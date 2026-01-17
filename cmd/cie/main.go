@@ -54,7 +54,7 @@ type GlobalFlags struct {
 
 // logInfo outputs an informational message to stderr if verbose mode is enabled.
 // Messages are suppressed if quiet mode is active.
-func logInfo(globals GlobalFlags, format string, args ...interface{}) {
+func logInfo(globals GlobalFlags, format string, args ...interface{}) { //nolint:unused // Reserved for future use
 	if !globals.Quiet && globals.Verbose >= 1 {
 		fmt.Fprintf(os.Stderr, "[INFO] "+format+"\n", args...)
 	}
@@ -62,7 +62,7 @@ func logInfo(globals GlobalFlags, format string, args ...interface{}) {
 
 // logDebug outputs a debug message to stderr if debug verbosity is enabled (-vv).
 // Debug messages are shown regardless of quiet mode for troubleshooting.
-func logDebug(globals GlobalFlags, format string, args ...interface{}) {
+func logDebug(globals GlobalFlags, format string, args ...interface{}) { //nolint:unused // Reserved for future use
 	if globals.Verbose >= 2 {
 		fmt.Fprintf(os.Stderr, "[DEBUG] "+format+"\n", args...)
 	}
@@ -70,7 +70,7 @@ func logDebug(globals GlobalFlags, format string, args ...interface{}) {
 
 // logError outputs an error message to stderr unless quiet mode is active.
 // Note: Fatal errors should still use errors.FatalError() which handles quiet mode.
-func logError(globals GlobalFlags, format string, args ...interface{}) {
+func logError(globals GlobalFlags, format string, args ...interface{}) { //nolint:unused // Reserved for future use
 	if !globals.Quiet {
 		fmt.Fprintf(os.Stderr, "[ERROR] "+format+"\n", args...)
 	}

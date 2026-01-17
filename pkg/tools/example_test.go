@@ -60,11 +60,13 @@ func ExampleGrep() {
 	fmt.Printf("Searching for: %s\n", args.Text)
 	fmt.Printf("In path: %s\n", args.Path)
 	fmt.Printf("Case sensitive: %v\n", args.CaseSensitive)
+	fmt.Printf("Limit: %d\n", args.Limit)
 
 	// Output:
 	// Searching for: .GET(
 	// In path: internal/http
 	// Case sensitive: false
+	// Limit: 20
 }
 
 // ExampleFindFunction demonstrates how to locate a function by name.
@@ -110,17 +112,19 @@ func ExampleTracePath() {
 		Target:   "RegisterRoutes",
 		Source:   "main", // Auto-detects entry points if empty
 		MaxDepth: 10,     // Maximum call chain depth
-		MaxPaths: 3,      // Return top 3 shortest paths
+		MaxPaths: 3,
 	}
 
 	fmt.Printf("Tracing from: %s\n", args.Source)
 	fmt.Printf("To target: %s\n", args.Target)
 	fmt.Printf("Max depth: %d\n", args.MaxDepth)
+	fmt.Printf("Max paths: %d\n", args.MaxPaths)
 
 	// Output:
 	// Tracing from: main
 	// To target: RegisterRoutes
 	// Max depth: 10
+	// Max paths: 3
 }
 
 // ExampleAnalyze demonstrates how to ask architectural questions about the codebase

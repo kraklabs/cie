@@ -65,8 +65,8 @@ func TracePath(ctx context.Context, client Querier, args TracePathArgs) (*ToolRe
 
 	// Run BFS search
 	searchResult := runTraceSearch(ctx, client, sources, targetSet, args)
-	if searchResult.cancelled {
-		return NewResult("Search cancelled (timeout or cancellation)."), nil
+	if searchResult.canceled {
+		return NewResult("Search canceled (timeout or cancellation)."), nil
 	}
 
 	// Format and return output
@@ -97,7 +97,7 @@ type traceSearchResult struct {
 	paths         [][]TraceFuncInfo
 	nodesExplored int
 	limitReached  bool
-	cancelled     bool
+	canceled     bool
 }
 
 // pathNode represents a node in the BFS traversal.
@@ -120,7 +120,7 @@ func runTraceSearch(ctx context.Context, client Querier, sources []TraceFuncInfo
 		}
 		select {
 		case <-ctx.Done():
-			result.cancelled = true
+			result.canceled = true
 			return result
 		default:
 		}
@@ -131,8 +131,8 @@ func runTraceSearch(ctx context.Context, client Querier, sources []TraceFuncInfo
 			result.limitReached = true
 			break
 		}
-		if srcResult.cancelled {
-			result.cancelled = true
+		if srcResult.canceled {
+			result.canceled = true
 			return result
 		}
 	}
@@ -154,7 +154,7 @@ func searchFromSource(ctx context.Context, client Querier, src TraceFuncInfo, ta
 		if *totalNodes%100 == 0 {
 			select {
 			case <-ctx.Done():
-				result.cancelled = true
+				result.canceled = true
 				return result
 			default:
 			}

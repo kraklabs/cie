@@ -372,6 +372,10 @@ func TestSemanticSearchArgs_Defaults(t *testing.T) {
 		Query: "find authentication handlers",
 	}
 
+	// Verify Query is set
+	if args.Query != "find authentication handlers" {
+		t.Errorf("Query should be set, got %q", args.Query)
+	}
 	// Verify default values
 	if args.Limit != 0 {
 		t.Errorf("Default Limit should be 0 (filled by function), got %d", args.Limit)

@@ -811,6 +811,9 @@ func TestTracePathArgs_Unit_Defaults(t *testing.T) {
 		Target: "saveToDb",
 	}
 
+	if args.Target != "saveToDb" {
+		t.Errorf("Target should be set, got %q", args.Target)
+	}
 	if args.Source != "" {
 		t.Errorf("Default Source = %q, want empty", args.Source)
 	}
@@ -841,7 +844,7 @@ func TestTracePath_Unit_ContextCancellation(t *testing.T) {
 	// Create context with immediate cancellation
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
 	defer cancel()
-	time.Sleep(2 * time.Millisecond) // Ensure context is cancelled
+	time.Sleep(2 * time.Millisecond) // Ensure context is canceled
 
 	result, err := TracePath(ctx, client, TracePathArgs{
 		Target:   "fn1",

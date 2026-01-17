@@ -157,7 +157,7 @@ func TestCIEClient_Query_ContextCancellation(t *testing.T) {
 
 	_, err := client.Query(ctx, "?[name] := *cie_function { name }")
 	if err == nil {
-		t.Error("expected error for cancelled context")
+		t.Error("expected error for canceled context")
 	}
 }
 

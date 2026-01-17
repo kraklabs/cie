@@ -425,6 +425,8 @@ func (rl *RepoLoader) shouldExclude(path string, excludeGlobs []string) bool {
 //
 // Patterns are matched against the full path. If pattern doesn't start with **,
 // it can match anywhere in the path (implicit **/ prefix for convenience).
+//
+//nolint:gocyclo // Glob matching has inherent complexity
 func matchesGlob(path, pattern string) bool {
 	// Normalize pattern
 	pattern = filepath.ToSlash(pattern)

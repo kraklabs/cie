@@ -306,6 +306,8 @@ func isQodoModel(model string) bool {
 
 // generateEmbedding generates an embedding using the configured provider.
 // Supports Ollama API (/api/embeddings), llama.cpp server (/embedding), and OpenAI-compatible (/v1/embeddings).
+//
+//nolint:gocyclo // Embedding provider detection has inherent complexity
 func generateEmbedding(ctx context.Context, embeddingURL, embeddingModel, text string) ([]float64, error) {
 	// Preprocess the query for better code matching
 	processedText := preprocessQueryForCode(text, embeddingModel)

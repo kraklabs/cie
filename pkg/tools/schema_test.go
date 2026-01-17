@@ -58,7 +58,7 @@ func TestGetSchema_WithCancelledContext(t *testing.T) {
 	result, err := GetSchema(ctx)
 	assertNoError(t, err)
 	if result == nil {
-		t.Fatal("expected result even with cancelled context")
+		t.Fatal("expected result even with canceled context")
 	}
 }
 

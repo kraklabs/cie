@@ -252,12 +252,7 @@ func buildConfigOutput(configPath string, cfg *Config) *ConfigOutput {
 			Custom: make(map[string]RolePatternOutput),
 		}
 		for name, pattern := range cfg.Roles.Custom {
-			rolesOutput.Custom[name] = RolePatternOutput{
-				FilePattern: pattern.FilePattern,
-				NamePattern: pattern.NamePattern,
-				CodePattern: pattern.CodePattern,
-				Description: pattern.Description,
-			}
+			rolesOutput.Custom[name] = RolePatternOutput(pattern)
 		}
 		result.Roles = rolesOutput
 	}
@@ -276,6 +271,8 @@ func buildConfigOutput(configPath string, cfg *Config) *ConfigOutput {
 }
 
 // printConfigHuman prints the configuration in human-readable format.
+//
+//nolint:gocognit // Configuration display has inherent complexity
 func printConfigHuman(cfg *ConfigOutput) {
 	ui.Header("CIE Configuration")
 	fmt.Printf("%s  %s\n", ui.Label("Config File:"), ui.DimText(cfg.ConfigPath))

@@ -262,13 +262,17 @@ func (p *ollamaProvider) Generate(ctx context.Context, req GenerateRequest) (*Ge
 		if payload["options"] == nil {
 			payload["options"] = map[string]any{}
 		}
-		payload["options"].(map[string]any)["num_predict"] = req.MaxTokens
+		if opts, ok := payload["options"].(map[string]any); ok {
+			opts["num_predict"] = req.MaxTokens
+		}
 	}
 	if req.Temperature > 0 {
 		if payload["options"] == nil {
 			payload["options"] = map[string]any{}
 		}
-		payload["options"].(map[string]any)["temperature"] = req.Temperature
+		if opts, ok := payload["options"].(map[string]any); ok {
+			opts["temperature"] = req.Temperature
+		}
 	}
 
 	body, _ := json.Marshal(payload)
@@ -340,13 +344,17 @@ func (p *ollamaProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 		if payload["options"] == nil {
 			payload["options"] = map[string]any{}
 		}
-		payload["options"].(map[string]any)["num_predict"] = req.MaxTokens
+		if opts, ok := payload["options"].(map[string]any); ok {
+			opts["num_predict"] = req.MaxTokens
+		}
 	}
 	if req.Temperature > 0 {
 		if payload["options"] == nil {
 			payload["options"] = map[string]any{}
 		}
-		payload["options"].(map[string]any)["temperature"] = req.Temperature
+		if opts, ok := payload["options"].(map[string]any); ok {
+			opts["temperature"] = req.Temperature
+		}
 	}
 
 	body, _ := json.Marshal(payload)
