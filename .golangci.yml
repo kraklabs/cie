@@ -1,128 +1,91 @@
 # Copyright 2025 KrakLabs
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# golangci-lint Configuration
+# golangci-lint v2 Configuration
 # golangci-lint configuration for CIE - Code Intelligence Engine
 #
 # Run:     golangci-lint run ./...
 # Install: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 # Docs:    https://golangci-lint.run/usage/configuration/
 
-version: 2
+version: "2"
 
-# ==============================================================================
-# Run Configuration
-# ==============================================================================
 run:
-  timeout: 5m
-  tests: true
   go: "1.24"
-
-  skip-files:
-    - ".*_generated\\.go$"
-    - ".*\\.pb\\.go$"
-
-  skip-dirs:
-    - vendor
-    - testdata
-
-# ==============================================================================
-# Output Configuration
-# ==============================================================================
-output:
-  format: colored-line-number
-  print-issued-lines: true
-  print-linter-name: true
-
-# ==============================================================================
-# Linters
-# ==============================================================================
+  tests: true
 linters:
-  disable-all: true
+  default: none
   enable:
-    # --- Default/Essential ---
-    - errcheck        # Unchecked errors
-    - govet           # Suspicious constructs
-    - ineffassign     # Ineffectual assignments
-    - staticcheck     # Static analysis (includes gosimple)
-    - unused          # Unused code
-
-    # --- Bugs ---
-    - bodyclose       # HTTP response body close
-    - nilerr          # nil error returns
-    - sqlclosecheck   # SQL close checks
-
-    # --- Style ---
-    - misspell        # Spelling mistakes
-    - unconvert       # Unnecessary conversions
-    - whitespace      # Whitespace issues
-
-    # --- Complexity ---
-    - gocyclo         # Cyclomatic complexity
-    - gocognit        # Cognitive complexity
-
-    # --- Security ---
-    - gosec           # Security issues
-
-# ==============================================================================
-# Linter Settings
-# ==============================================================================
-linters-settings:
-  errcheck:
-    check-type-assertions: true
-    check-blank: false
-
-  gocyclo:
-    min-complexity: 20
-
-  gocognit:
-    min-complexity: 30
-
-  govet:
-    enable-all: true
-    disable:
-      - fieldalignment  # Too pedantic
-
-  gosec:
-    excludes:
-      - G104  # Handled by errcheck
-
-  misspell:
-    locale: US
-
-  staticcheck:
-    checks:
-      - all
-      - -SA1019  # Allow deprecated (we'll fix separately)
-
-# ==============================================================================
-# Issues Configuration
-# ==============================================================================
+    - bodyclose
+    - errcheck
+    - gocognit
+    - gocyclo
+    - gosec
+    - govet
+    - ineffassign
+    - misspell
+    - nilerr
+    - sqlclosecheck
+    - staticcheck
+    - unconvert
+    - unused
+    - whitespace
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: false
+    gocognit:
+      min-complexity: 30
+    gocyclo:
+      min-complexity: 20
+    gosec:
+      excludes:
+        - G104
+    govet:
+      disable:
+        - fieldalignment
+      enable-all: true
+    misspell:
+      locale: US
+    staticcheck:
+      checks:
+        - all
+        - -SA1019
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - errcheck
+          - gocognit
+          - gocyclo
+          - gosec
+        path: _test\.go
+      - linters:
+          - govet
+        text: 'shadow: declaration of "err"'
+      - linters:
+          - govet
+        text: 'shadow: declaration of "ctx"'
+      - linters:
+          - all
+        path: .*\.pb\.go$
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
 issues:
   max-issues-per-linter: 50
   max-same-issues: 10
   new: false
-
-  exclude-rules:
-    # Relax rules for tests
-    - path: _test\.go
-      linters:
-        - gocyclo
-        - gocognit
-        - gosec
-        - errcheck
-
-    # Allow shadowing err
-    - linters:
-        - govet
-      text: "shadow: declaration of \"err\""
-
-    # Allow shadowing ctx
-    - linters:
-        - govet
-      text: "shadow: declaration of \"ctx\""
-
-    # Exclude false positives in generated code
-    - path: ".*\\.pb\\.go$"
-      linters:
-        - all
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
