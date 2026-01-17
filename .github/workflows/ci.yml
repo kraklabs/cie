@@ -69,8 +69,9 @@ jobs:
         env:
           COZO_VERSION: "0.7.6"
         run: |
-          # Download pre-built CozoDB C library
-          curl -L "https://github.com/cozodb/cozo/releases/download/v${COZO_VERSION}/libcozo_c-${COZO_VERSION}-x86_64-unknown-linux-gnu.a" -o /tmp/libcozo_c.a
+          # Download pre-built CozoDB C library (gzip compressed)
+          curl -L "https://github.com/cozodb/cozo/releases/download/v${COZO_VERSION}/libcozo_c-${COZO_VERSION}-x86_64-unknown-linux-gnu.a.gz" -o /tmp/libcozo_c.a.gz
+          gunzip /tmp/libcozo_c.a.gz
           sudo cp /tmp/libcozo_c.a /usr/lib/libcozo_c.a
 
       - name: Download modules
@@ -117,7 +118,7 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          version: v2.7.2
           args: --timeout=5m
 
   # ===========================================================================
@@ -168,8 +169,9 @@ jobs:
         env:
           COZO_VERSION: "0.7.6"
         run: |
-          # Download pre-built CozoDB C library
-          curl -L "https://github.com/cozodb/cozo/releases/download/v${COZO_VERSION}/libcozo_c-${COZO_VERSION}-x86_64-unknown-linux-gnu.a" -o /tmp/libcozo_c.a
+          # Download pre-built CozoDB C library (gzip compressed)
+          curl -L "https://github.com/cozodb/cozo/releases/download/v${COZO_VERSION}/libcozo_c-${COZO_VERSION}-x86_64-unknown-linux-gnu.a.gz" -o /tmp/libcozo_c.a.gz
+          gunzip /tmp/libcozo_c.a.gz
           sudo cp /tmp/libcozo_c.a /usr/lib/libcozo_c.a
 
       - name: Build
