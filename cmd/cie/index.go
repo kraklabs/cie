@@ -213,7 +213,7 @@ func checkLocalData(cfg *Config) (bool, int, error) {
 		return false, 0, nil
 	}
 
-	// TODO: Query CozoDB for actual function count
+	// TODO(v0.2): Query CozoDB for actual function count
 	// For now, just check if directory exists
 	return true, -1, nil
 }
