@@ -65,7 +65,7 @@ var (
 )
 
 // SemanticSearch performs semantic search using embeddings
-func SemanticSearch(ctx context.Context, client *CIEClient, args SemanticSearchArgs) (*ToolResult, error) {
+func SemanticSearch(ctx context.Context, client Querier, args SemanticSearchArgs) (*ToolResult, error) {
 	args = normalizeSemanticArgs(args)
 	if args.Query == "" {
 		return NewError("Error: 'query' is required"), nil
@@ -122,7 +122,7 @@ func normalizeSemanticArgs(args SemanticSearchArgs) SemanticSearchArgs {
 	return args
 }
 
-func executeHNSWQuery(ctx context.Context, client *CIEClient, embedding []float64, args SemanticSearchArgs) (*QueryResult, error) {
+func executeHNSWQuery(ctx context.Context, client Querier, embedding []float64, args SemanticSearchArgs) (*QueryResult, error) {
 	vecLiteral := formatEmbeddingForCozoDB(embedding)
 	queryK, ef := buildHNSWParams(args.Limit, args.Role, args.PathPattern)
 	script := fmt.Sprintf(`?[name, file_path, signature, start_line, distance, code_text] :=
@@ -210,7 +210,7 @@ func getConfidenceIcon(similarity float64) string {
 }
 
 // semanticSearchFallback uses text search when semantic search is unavailable
-func semanticSearchFallback(ctx context.Context, client *CIEClient, query string, limit int, role, pathPattern, excludePaths, reason string) (*ToolResult, error) {
+func semanticSearchFallback(ctx context.Context, client Querier, query string, limit int, role, pathPattern, excludePaths, reason string) (*ToolResult, error) {
 	// Extract key terms and use regex search
 	terms := ExtractKeyTerms(query)
 	if len(terms) == 0 {

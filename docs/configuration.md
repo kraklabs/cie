@@ -1527,4 +1527,4 @@ cie help
 
 ---
 
-**Questions or issues?** See [Troubleshooting Guide](./troubleshooting.md) or file an issue on [GitHub](https://github.com/kraklabs/kraken/issues).
+**Questions or issues?** See [Troubleshooting Guide](./troubleshooting.md) or file an issue on [GitHub](https://github.com/kraklabs/cie/issues).

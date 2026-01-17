@@ -153,7 +153,7 @@ package mypackage
 import (
     "testing"
 
-    cozodbtest "github.com/kraklabs/kraken/internal/testing/cozodb"
+    cozodbtest "github.com/kraklabs/cie/internal/testing/cozodb"
     cietest "github.com/kraklabs/cie/internal/testing"
 )
 
@@ -178,7 +178,7 @@ Tests with these tags only run when: `go test -tags=cozodb`
 
 ### Root-Level Infrastructure
 
-Located at `/internal/testing/cozodb/`:
+Located at `internal/testing/cozodb/`:
 
 | Function | Purpose |
 |----------|---------|
@@ -195,7 +195,7 @@ Located at `/internal/testing/cozodb/`:
 
 ### CIE Module Helpers
 
-Located at `/modules/cie/internal/testing/`:
+Located at `internal/testing/`:
 
 | Function | Purpose |
 |----------|---------|
@@ -485,6 +485,6 @@ func TestIngestionPipeline(t *testing.T) {
 
 - [CozoDB Documentation](https://docs.cozodb.org/)
 - [Testcontainers-Go Documentation](https://golang.testcontainers.org/)
-- [Root testcontainer infrastructure](/internal/testing/cozodb/)
-- [CIE testing helpers source](/modules/cie/internal/testing/)
-- [Example integration test](/modules/cie/pkg/tools/client_test_cozodb.go)
+- [Root testcontainer infrastructure](../internal/testing/cozodb/)
+- [CIE testing helpers source](../internal/testing/)
+- [Example integration test](../pkg/tools/client_test_cozodb.go)

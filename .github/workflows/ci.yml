@@ -10,6 +10,7 @@
 # Jobs:
 #   - test: Run tests with coverage
 #   - lint: Run golangci-lint
+#   - security: Run gitleaks secret scan
 #   - build: Verify build works
 
 name: CI
@@ -37,6 +38,10 @@ concurrency:
 
 env:
   GO_VERSION: "1.24"
+
+# Default permissions - principle of least privilege
+permissions:
+  contents: read
 
 jobs:
   # ===========================================================================
@@ -102,6 +107,23 @@ jobs:
           args: --timeout=5m
 
   # ===========================================================================
+  # Security Job
+  # ===========================================================================
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ===========================================================================
   # Build Job
   # ===========================================================================
   build:
@@ -136,7 +158,7 @@ jobs:
   # ===========================================================================
   ci-success:
     name: CI Success
-    needs: [test, lint, build]
+    needs: [test, lint, security, build]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -144,6 +166,7 @@ jobs:
         run: |
           if [[ "${{ needs.test.result }}" != "success" ]] || \
              [[ "${{ needs.lint.result }}" != "success" ]] || \
+             [[ "${{ needs.security.result }}" != "success" ]] || \
              [[ "${{ needs.build.result }}" != "success" ]]; then
             echo "One or more jobs failed"
             exit 1

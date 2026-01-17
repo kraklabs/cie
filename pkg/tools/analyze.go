@@ -242,7 +242,7 @@ type analyzeState struct {
 }
 
 // Analyze uses semantic search + LLM to answer architectural questions about the codebase
-func Analyze(ctx context.Context, client *CIEClient, args AnalyzeArgs) (*ToolResult, error) {
+func Analyze(ctx context.Context, client Querier, args AnalyzeArgs) (*ToolResult, error) {
 	if args.Question == "" {
 		return NewError("Error: 'question' is required"), nil
 	}
@@ -274,7 +274,7 @@ func Analyze(ctx context.Context, client *CIEClient, args AnalyzeArgs) (*ToolRes
 }
 
 // addIndexStats adds basic index statistics to sections.
-func (s *analyzeState) addIndexStats(ctx context.Context, client *CIEClient) {
+func (s *analyzeState) addIndexStats(ctx context.Context, client Querier) {
 	fileCount := countWithFallback(ctx, client, "file count",
 		`?[count(f)] := *cie_file { id: f }`,
 		`?[id] := *cie_file { id } :limit 10000`)
@@ -289,10 +289,17 @@ func (s *analyzeState) addIndexStats(ctx context.Context, client *CIEClient) {
 }
 
 // performSemanticSearch executes both localized and global semantic searches.
-func (s *analyzeState) performSemanticSearch(ctx context.Context, client *CIEClient) {
-	if client.EmbeddingURL == "" || client.EmbeddingModel == "" {
+func (s *analyzeState) performSemanticSearch(ctx context.Context, client Querier) {
+	// Try to get embedding config from CIEClient if available
+	embeddingURL, embeddingModel := "", ""
+	if cieClient, ok := client.(*CIEClient); ok {
+		embeddingURL = cieClient.EmbeddingURL
+		embeddingModel = cieClient.EmbeddingModel
+	}
+
+	if embeddingURL == "" || embeddingModel == "" {
 		s.errors = append(s.errors, fmt.Sprintf("embedding not configured (url=%q, model=%q) - using keyword fallback",
-			client.EmbeddingURL, client.EmbeddingModel))
+			embeddingURL, embeddingModel))
 		s.searchFailed = true
 		return
 	}
@@ -362,7 +369,7 @@ func formatFunctionList(funcs []relevantFunction) string {
 }
 
 // performKeywordFallback runs keyword search when semantic search fails.
-func (s *analyzeState) performKeywordFallback(ctx context.Context, client *CIEClient) {
+func (s *analyzeState) performKeywordFallback(ctx context.Context, client Querier) {
 	if !s.searchFailed {
 		return
 	}
@@ -393,7 +400,7 @@ func buildKeywordPattern(terms []string) string {
 }
 
 // runKeywordNameSearch searches function names for keywords.
-func (s *analyzeState) runKeywordNameSearch(ctx context.Context, client *CIEClient, pattern string) {
+func (s *analyzeState) runKeywordNameSearch(ctx context.Context, client Querier, pattern string) {
 	query := fmt.Sprintf(`?[name, file_path, start_line] := *cie_function { name, file_path, start_line }, regex_matches(name, %q) :limit 30`, pattern)
 	if s.args.PathPattern != "" {
 		query = fmt.Sprintf(`?[name, file_path, start_line] := *cie_function { name, file_path, start_line }, regex_matches(name, %q), regex_matches(file_path, %q) :limit 30`, pattern, s.args.PathPattern)
@@ -404,7 +411,7 @@ func (s *analyzeState) runKeywordNameSearch(ctx context.Context, client *CIEClie
 }
 
 // runKeywordCodeSearch searches function code for keywords.
-func (s *analyzeState) runKeywordCodeSearch(ctx context.Context, client *CIEClient, pattern string) {
+func (s *analyzeState) runKeywordCodeSearch(ctx context.Context, client Querier, pattern string) {
 	query := fmt.Sprintf(`?[name, file_path, start_line] := *cie_function { id, name, file_path, start_line }, *cie_function_code { function_id: id, code_text }, regex_matches(code_text, %q) :limit 30`, pattern)
 	if s.args.PathPattern != "" {
 		query = fmt.Sprintf(`?[name, file_path, start_line] := *cie_function { id, name, file_path, start_line }, *cie_function_code { function_id: id, code_text }, regex_matches(code_text, %q), regex_matches(file_path, %q) :limit 30`, pattern, s.args.PathPattern)
@@ -415,7 +422,7 @@ func (s *analyzeState) runKeywordCodeSearch(ctx context.Context, client *CIEClie
 }
 
 // runContextualQueries runs keyword queries based on question context.
-func (s *analyzeState) runContextualQueries(ctx context.Context, client *CIEClient) {
+func (s *analyzeState) runContextualQueries(ctx context.Context, client Querier) {
 	questionLower := Query2Lower(s.args.Question)
 	testFilter := s.getTestExcludeFilter()
 
@@ -444,7 +451,7 @@ func (s *analyzeState) getTestExcludeFilter() string {
 }
 
 // runEntryPointQuery searches for main/entry point functions.
-func (s *analyzeState) runEntryPointQuery(ctx context.Context, client *CIEClient, testFilter string) {
+func (s *analyzeState) runEntryPointQuery(ctx context.Context, client Querier, testFilter string) {
 	query := fmt.Sprintf(`?[name, file_path, start_line] := *cie_function { name, file_path, start_line }, name == "main"%s :limit 20`, testFilter)
 	if s.args.PathPattern != "" {
 		query = fmt.Sprintf(`?[name, file_path, start_line] := *cie_function { name, file_path, start_line }, name == "main", regex_matches(file_path, %q)%s :limit 20`, s.args.PathPattern, testFilter)
@@ -455,7 +462,7 @@ func (s *analyzeState) runEntryPointQuery(ctx context.Context, client *CIEClient
 }
 
 // runRouteQuery searches for HTTP route definitions.
-func (s *analyzeState) runRouteQuery(ctx context.Context, client *CIEClient, testFilter string) {
+func (s *analyzeState) runRouteQuery(ctx context.Context, client Querier, testFilter string) {
 	query := fmt.Sprintf(`?[name, file_path, start_line] := *cie_function { id, name, file_path, start_line }, *cie_function_code { function_id: id, code_text }, regex_matches(code_text, "[.](GET|POST|PUT|DELETE|PATCH|Handle)[(]")%s :limit 20`, testFilter)
 	if s.args.PathPattern != "" {
 		query = fmt.Sprintf(`?[name, file_path, start_line] := *cie_function { id, name, file_path, start_line }, *cie_function_code { function_id: id, code_text }, regex_matches(code_text, "[.](GET|POST|PUT|DELETE|PATCH|Handle)[(]"), regex_matches(file_path, %q)%s :limit 20`, s.args.PathPattern, testFilter)
@@ -466,7 +473,7 @@ func (s *analyzeState) runRouteQuery(ctx context.Context, client *CIEClient, tes
 }
 
 // runArchitectureQuery extracts directory structure.
-func (s *analyzeState) runArchitectureQuery(ctx context.Context, client *CIEClient) {
+func (s *analyzeState) runArchitectureQuery(ctx context.Context, client Querier) {
 	query := `?[path] := *cie_file { path } :limit 100`
 	if s.args.PathPattern != "" {
 		query = fmt.Sprintf(`?[path] := *cie_file { path }, regex_matches(path, %q) :limit 100`, s.args.PathPattern)
@@ -492,7 +499,7 @@ func (s *analyzeState) runArchitectureQuery(ctx context.Context, client *CIEClie
 }
 
 // runQuery executes a query with error tracking.
-func (s *analyzeState) runQuery(ctx context.Context, client *CIEClient, name, query string) *QueryResult {
+func (s *analyzeState) runQuery(ctx context.Context, client Querier, name, query string) *QueryResult {
 	result, err := client.Query(ctx, query)
 	if err != nil {
 		s.errors = append(s.errors, fmt.Sprintf("%s: %v", name, err))
@@ -502,7 +509,7 @@ func (s *analyzeState) runQuery(ctx context.Context, client *CIEClient, name, qu
 }
 
 // buildOutput constructs the final analysis output.
-func (s *analyzeState) buildOutput(ctx context.Context, client *CIEClient) (*ToolResult, error) {
+func (s *analyzeState) buildOutput(ctx context.Context, client Querier) (*ToolResult, error) {
 	output := fmt.Sprintf("# Analysis: %s\n\n", s.args.Question)
 	if s.args.PathPattern != "" {
 		output += fmt.Sprintf("_Scope: `%s`_\n\n", s.args.PathPattern)
@@ -534,11 +541,18 @@ func (s *analyzeState) buildOutput(ctx context.Context, client *CIEClient) (*Too
 	// Merge localized + global for code context (localized first, they're more relevant)
 	allRelevantFuncs := append(s.localizedFuncs, s.globalFuncs...)
 
-	// Generate LLM narrative with code context
-	if client.LLMClient != nil && (len(s.sections) > 1 || len(allRelevantFuncs) > 0) {
+	// Generate LLM narrative with code context (if CIEClient with LLM configured)
+	var llmClient llm.Provider
+	var llmMaxTokens int
+	if cieClient, ok := client.(*CIEClient); ok {
+		llmClient = cieClient.LLMClient
+		llmMaxTokens = cieClient.LLMMaxTokens
+	}
+
+	if llmClient != nil && (len(s.sections) > 1 || len(allRelevantFuncs) > 0) {
 		// Build enriched context with actual code
 		codeContext := buildCodeContext(allRelevantFuncs)
-		narrative, err := generateNarrativeWithCode(ctx, client.LLMClient, s.args.Question, output, codeContext, client.LLMMaxTokens)
+		narrative, err := generateNarrativeWithCode(ctx, llmClient, s.args.Question, output, codeContext, llmMaxTokens)
 		if err != nil {
 			output += fmt.Sprintf("\n---\n_LLM narrative generation failed: %v_\n", err)
 		} else if narrative != "" {
@@ -548,7 +562,7 @@ func (s *analyzeState) buildOutput(ctx context.Context, client *CIEClient) (*Too
 				"\n\n---\n\n## Raw Analysis Data\n\n" +
 				strings.TrimPrefix(output, fmt.Sprintf("# Analysis: %s\n\n", s.args.Question))
 		}
-	} else if client.LLMClient == nil {
+	} else if llmClient == nil {
 		output += "\n---\n_Note: LLM not configured. Run `cie init` to enable narrative generation._\n"
 	}
 
@@ -556,9 +570,19 @@ func (s *analyzeState) buildOutput(ctx context.Context, client *CIEClient) (*Too
 }
 
 // findRelevantFunctions uses semantic search to find the most relevant functions for a question
-func findRelevantFunctions(ctx context.Context, client *CIEClient, question, pathPattern, role string, limit int) ([]relevantFunction, error) {
+func findRelevantFunctions(ctx context.Context, client Querier, question, pathPattern, role string, limit int) ([]relevantFunction, error) {
+	// Get embedding config from CIEClient if available
+	embeddingURL, embeddingModel := "", ""
+	if cieClient, ok := client.(*CIEClient); ok {
+		embeddingURL = cieClient.EmbeddingURL
+		embeddingModel = cieClient.EmbeddingModel
+	}
+	if embeddingURL == "" || embeddingModel == "" {
+		return nil, fmt.Errorf("embedding not configured")
+	}
+
 	// Generate embedding for the question
-	embedding, err := generateEmbedding(ctx, client.EmbeddingURL, client.EmbeddingModel, question)
+	embedding, err := generateEmbedding(ctx, embeddingURL, embeddingModel, question)
 	if err != nil {
 		return nil, fmt.Errorf("generate embedding: %w", err)
 	}
@@ -634,13 +658,23 @@ func findRelevantFunctions(ctx context.Context, client *CIEClient, question, pat
 // findRelevantFunctionsLocalized does semantic search restricted to a specific path pattern.
 // Uses a very high k value to ensure we capture functions from the specific path.
 // Applies keyword boosting to re-rank results based on question terms in function names.
-func findRelevantFunctionsLocalized(ctx context.Context, client *CIEClient, question, pathPattern, role string, limit int) ([]relevantFunction, error) {
+func findRelevantFunctionsLocalized(ctx context.Context, client Querier, question, pathPattern, role string, limit int) ([]relevantFunction, error) {
 	if pathPattern == "" {
 		return nil, nil // No path pattern, nothing to localize
 	}
 
+	// Get embedding config from CIEClient if available
+	embeddingURL, embeddingModel := "", ""
+	if cieClient, ok := client.(*CIEClient); ok {
+		embeddingURL = cieClient.EmbeddingURL
+		embeddingModel = cieClient.EmbeddingModel
+	}
+	if embeddingURL == "" || embeddingModel == "" {
+		return nil, fmt.Errorf("embedding not configured")
+	}
+
 	// Generate embedding for the question
-	embedding, err := generateEmbedding(ctx, client.EmbeddingURL, client.EmbeddingModel, question)
+	embedding, err := generateEmbedding(ctx, embeddingURL, embeddingModel, question)
 	if err != nil {
 		return nil, fmt.Errorf("generate embedding: %w", err)
 	}
@@ -743,7 +777,7 @@ func findRelevantFunctionsLocalized(ctx context.Context, client *CIEClient, ques
 }
 
 // getFunctionCodeByName retrieves the code for a specific function
-func getFunctionCodeByName(ctx context.Context, client *CIEClient, name, filePath string) (string, error) {
+func getFunctionCodeByName(ctx context.Context, client Querier, name, filePath string) (string, error) {
 	// Query for function code using name and file_path to be specific
 	script := fmt.Sprintf(`?[code_text] :=
 		*cie_function { id, name, file_path },

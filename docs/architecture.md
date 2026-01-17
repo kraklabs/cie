@@ -2109,7 +2109,7 @@ CIE is designed to be extended. Here are the primary extension points with code 
 
 Found an error in this documentation? Have suggestions for improvement?
 
-- **File an issue:** https://github.com/kraklabs/kraken/issues
+- **File an issue:** https://github.com/kraklabs/cie/issues
 - **Contribute:** See `CONTRIBUTING.md`
 
 ---

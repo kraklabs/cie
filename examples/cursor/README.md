@@ -232,7 +232,7 @@ For comprehensive documentation, see:
 - **[Configuration Reference](../../docs/configuration.md)** - All configuration options for `.cie/project.yaml`
 - **[Troubleshooting Guide](../../docs/troubleshooting.md)** - Solutions to common issues
 - **[Architecture Overview](../../docs/architecture.md)** - How CIE works internally
-- **[Cursor MCP Documentation](https://cursor.sh/docs/mcp)** - Official Cursor MCP docs
+- **[Cursor Documentation](https://cursor.sh/docs)** - Official Cursor docs
 
 ## Support
 

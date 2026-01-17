@@ -1,7 +1,7 @@
 # Security Audit Report - CIE Module
 
 **Scan Date:** 2026-01-16
-**Tool:** gosec (Go Security Checker)
+**Tools:** gosec (Go Security Checker), gitleaks (Secret Detection)
 **Module:** modules/cie
 
 ---
@@ -154,9 +154,60 @@ golangci-lint run ./...
 
 ---
 
+## Gitleaks Secret Scan Results
+
+**Scan Date:** 2026-01-16
+**Tool Version:** gitleaks v8.30.0
+**Ruleset:** Default gitleaks rules (800+ secret patterns including AWS, GitHub, generic API keys, private keys, etc.)
+
+### Scan Configuration
+
+| Scan Type | Description | Exit Code | Result |
+|-----------|-------------|-----------|--------|
+| Current State | Files in working directory (`--no-git`) | 0 | ✅ No leaks found |
+| Git History | All 65 commits scanned (default branch) | 0 | ✅ No leaks found |
+| All Branches | Full history with `--log-opts="--all"` | 0 | ✅ No leaks found |
+
+### Gitleaks Statistics
+
+| Metric | Value |
+|--------|-------|
+| Total Commits (all branches) | 65 |
+| Bytes Scanned | 1.94 MB (history), 2.07 MB (current) |
+| Scan Duration | 176-303ms |
+| Leaks Detected | 0 |
+| False Positives | 0 (no allowlist needed) |
+
+### Summary
+
+No secrets, tokens, API keys, or credentials were detected in:
+- Current source files (2.07 MB scanned)
+- Git commit history (65 commits across all branches)
+- Any branch in the repository
+
+**All scans returned exit code 0**, confirming clean results for CI integration.
+
+### Verification Commands
+
+```bash
+# Scan current state (files only) - expected exit code: 0
+gitleaks detect --source . -v --no-git
+
+# Scan git history (default branch) - expected exit code: 0
+gitleaks detect --source . -v
+
+# Scan all branches - expected exit code: 0
+gitleaks detect --source . --log-opts="--all" -v
+
+# Verify commit count across all branches
+git rev-list --all --count  # Returns: 65
+```
+
+---
+
 ## Appendix: nolint Comments
 
-All issues have inline `//nolint:gosec` comments with rule IDs and justifications:
+All gosec issues have inline `//nolint:gosec` comments with rule IDs and justifications:
 
 ```go
 // Example format:

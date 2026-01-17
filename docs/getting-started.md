@@ -78,7 +78,7 @@ If you have Go 1.24+ and the CozoDB library installed:
 
 ```bash
 # Install CIE
-go install github.com/kraklabs/kraken/modules/cie/cmd/cie@latest
+go install github.com/kraklabs/cie/modules/cie/cmd/cie@latest
 
 # Verify installation
 cie version
@@ -96,7 +96,7 @@ For contributors or if you want the latest development version:
 
 ```bash
 # Clone the repository
-git clone https://github.com/kraklabs/kraken.git
+git clone https://github.com/kraklabs/cie.git
 cd kraken/modules/cie
 
 # Build CIE
@@ -117,7 +117,7 @@ Run CIE in a container for isolation:
 
 ```bash
 # Clone the repository
-git clone https://github.com/kraklabs/kraken.git
+git clone https://github.com/kraklabs/cie.git
 cd kraken/modules/cie
 
 # Start CIE with Docker Compose
@@ -439,7 +439,7 @@ Common issues and quick fixes:
 | **No functions found** | `Functions indexed: 0` | Check file extensions. Supported: `.go`, `.py`, `.js`, `.ts`, `.tsx`. |
 | **Permission denied** | `cannot create directory .cie` | Check write permissions in project directory: `ls -la` |
 
-**Still having issues?** See the [Troubleshooting Guide](./troubleshooting.md) for comprehensive solutions or file an issue on [GitHub](https://github.com/kraklabs/kraken/issues).
+**Still having issues?** See the [Troubleshooting Guide](./troubleshooting.md) for comprehensive solutions or file an issue on [GitHub](https://github.com/kraklabs/cie/issues).
 
 ---
 
@@ -458,7 +458,7 @@ Now that you have CIE running, explore these resources:
 
 **Quick links:**
 - **Main README**: [../README.md](../README.md)
-- **GitHub Issues**: [Report bugs or request features](https://github.com/kraklabs/kraken/issues)
+- **GitHub Issues**: [Report bugs or request features](https://github.com/kraklabs/cie/issues)
 - **License**: [AGPL v3](../LICENSE) (dual licensing available)
 
 ---

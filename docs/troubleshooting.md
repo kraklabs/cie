@@ -619,7 +619,7 @@ cie index
 
 **Related:**
 - [Batch Size Configuration](./configuration.md#batch-size)
-- [CozoDB Limits](https://docs.cozodb.org/en/latest/limits.html)
+- [CozoDB Documentation](https://docs.cozodb.org/)
 
 ---
 
@@ -1875,19 +1875,19 @@ If you can't find a solution here:
 
 Check if your problem is already reported:
 
-[CIE GitHub Issues](https://github.com/kraklabs/kraken/issues?q=is%3Aissue+label%3Acie)
+[CIE GitHub Issues](https://github.com/kraklabs/cie/issues?q=is%3Aissue+label%3Acie)
 
 ### 2. Ask in Discussions
 
 For questions and support:
 
-[CIE Discussions](https://github.com/kraklabs/kraken/discussions)
+[CIE Discussions](https://github.com/kraklabs/cie/discussions)
 
 ### 3. Report a Bug
 
 If you've found a bug, please report it:
 
-[Create New Issue](https://github.com/kraklabs/kraken/issues/new?labels=cie,bug)
+[Create New Issue](https://github.com/kraklabs/cie/issues/new?labels=cie,bug)
 
 **Include this information:**
 ```bash
