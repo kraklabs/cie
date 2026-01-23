@@ -159,6 +159,10 @@ func DefaultConfig(projectID string) *Config {
 // found, read, or parsed.
 func LoadConfig(configPath string) (*Config, error) {
 	if configPath == "" {
+		// Check CIE_CONFIG_PATH environment variable first (used in Docker)
+		configPath = os.Getenv("CIE_CONFIG_PATH")
+	}
+	if configPath == "" {
 		// Find .cie/project.yaml in current or parent directories
 		var err error
 		configPath, err = findConfigFile()

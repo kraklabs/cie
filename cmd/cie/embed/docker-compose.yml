@@ -45,10 +45,13 @@ services:
       - "9090:8080"
     volumes:
       - cie-data:/data
+      - ${CIE_PROJECT_DIR:-.}/.cie:/project-config:ro
     environment:
       OLLAMA_HOST: http://ollama:11434
       OLLAMA_EMBED_MODEL: nomic-embed-text
       CIE_DATA_DIR: /data
+      CIE_PROJECT_ID: ${CIE_PROJECT_ID:-default}
+      CIE_CONFIG_PATH: /project-config/project.yaml
     depends_on:
       ollama:
         condition: service_healthy

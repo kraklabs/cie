@@ -105,9 +105,27 @@ Examples:
 		), globals.JSON)
 	}
 
-	// 3. Run docker compose up -d from ~/.cie/
+	// 3. Load config to get project info for Docker
+	composeEnv := make(map[string]string)
+	cfg, err := LoadConfig(configPath)
+	if err == nil && cfg.ProjectID != "" {
+		composeEnv["CIE_PROJECT_ID"] = cfg.ProjectID
+		// Get the project directory (parent of .cie/)
+		if configPath != "" {
+			projectDir := filepath.Dir(filepath.Dir(configPath))
+			composeEnv["CIE_PROJECT_DIR"] = projectDir
+		} else {
+			// Use current working directory
+			if cwd, err := os.Getwd(); err == nil {
+				composeEnv["CIE_PROJECT_DIR"] = cwd
+			}
+		}
+		ui.Infof("Project: %s", cfg.ProjectID)
+	}
+
+	// 4. Run docker compose up -d from ~/.cie/
 	ui.Info("Starting containers...")
-	if err := runComposeCommand(composeDir, "up", "-d"); err != nil {
+	if err := runComposeCommandWithEnv(composeDir, composeEnv, "up", "-d"); err != nil {
 		errors.FatalError(errors.NewInternalError(
 			"Failed to start containers",
 			"Docker Compose up failed",
@@ -156,10 +174,19 @@ func checkDocker() error {
 }
 
 func runComposeCommand(dir string, args ...string) error {
+	return runComposeCommandWithEnv(dir, nil, args...)
+}
+
+func runComposeCommandWithEnv(dir string, env map[string]string, args ...string) error {
 	cmdArgs := append([]string{"compose", "-f", filepath.Join(dir, "docker-compose.yml")}, args...)
 	cmd := exec.Command("docker", cmdArgs...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	// Inherit current environment and add custom vars
+	cmd.Env = os.Environ()
+	for k, v := range env {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
 	return cmd.Run()
 }
 
