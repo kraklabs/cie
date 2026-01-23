@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-01-23
+
 ### Added
 - Incremental indexing: only process changed files since last indexed commit.
 - Uses `git diff --name-status` to detect added, modified, deleted, and renamed files.
@@ -127,7 +129,8 @@ Initial open source release of CIE (Code Intelligence Engine).
 - No hardcoded credentials in codebase
 - All API keys via environment variables only
 
-[unreleased]: https://github.com/kraklabs/cie/compare/v0.4.1...HEAD
+[unreleased]: https://github.com/kraklabs/cie/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/kraklabs/cie/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/kraklabs/cie/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/kraklabs/cie/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/kraklabs/cie/compare/v0.3.0...v0.3.1
