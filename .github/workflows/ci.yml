@@ -4,7 +4,7 @@
 # Continuous Integration workflow for CIE
 #
 # Runs on:
-#   - Push to main branch
+#   - Version tags (v*.*.*)
 #   - Pull requests to main branch
 #
 # Jobs:
@@ -17,12 +17,8 @@ name: CI
 
 on:
   push:
-    branches:
-      - main
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
-      - ".github/ISSUE_TEMPLATE/**"
+    tags:
+      - "v*.*.*"
   pull_request:
     branches:
       - main
