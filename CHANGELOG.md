@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-01-23
+
+### Changed
+- `cie start` now pulls latest Docker images before starting containers.
+- Docker image tag now matches CLI version (e.g., `v0.4.6` instead of `latest`).
+- Setup container now uses `docker compose run --rm` for cleaner execution.
+
+### Fixed
+- Fixed `cie start` hanging on first run when downloading embedding model.
+
 ## [0.4.5] - 2026-01-23
 
 ### Fixed
@@ -145,7 +155,8 @@ Initial open source release of CIE (Code Intelligence Engine).
 - No hardcoded credentials in codebase
 - All API keys via environment variables only
 
-[unreleased]: https://github.com/kraklabs/cie/compare/v0.4.5...HEAD
+[unreleased]: https://github.com/kraklabs/cie/compare/v0.4.6...HEAD
+[0.4.6]: https://github.com/kraklabs/cie/compare/v0.4.5...v0.4.6
 [0.4.5]: https://github.com/kraklabs/cie/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/kraklabs/cie/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/kraklabs/cie/compare/v0.4.2...v0.4.3

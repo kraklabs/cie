@@ -38,7 +38,7 @@ services:
       - setup
 
   cie-server:
-    image: ghcr.io/kraklabs/cie:latest
+    image: ghcr.io/kraklabs/cie:${CIE_IMAGE_TAG:-latest}
     container_name: cie-server
     user: "0:0"
     ports:

@@ -107,6 +107,14 @@ Examples:
 
 	// 3. Load config to get project info for Docker
 	composeEnv := make(map[string]string)
+
+	// Set the Docker image tag to match the CLI version
+	// This ensures the Docker image version matches the CLI version
+	if version != "dev" && version != "" {
+		composeEnv["CIE_IMAGE_TAG"] = version
+		ui.Infof("Using CIE image version: %s", version)
+	}
+
 	cfg, err := LoadConfig(configPath)
 	if err == nil && cfg.ProjectID != "" {
 		composeEnv["CIE_PROJECT_ID"] = cfg.ProjectID
@@ -123,7 +131,14 @@ Examples:
 		ui.Infof("Project: %s", cfg.ProjectID)
 	}
 
-	// 4. Run docker compose up -d from ~/.cie/
+	// 4. Pull latest images to ensure we have the newest version
+	ui.Info("Pulling latest images...")
+	if err := runComposeCommandWithEnv(composeDir, composeEnv, "pull", "--quiet"); err != nil {
+		// Don't fail on pull errors (might be offline), just warn
+		ui.Warning("Could not pull latest images, using cached versions")
+	}
+
+	// 5. Run docker compose up -d from ~/.cie/
 	ui.Info("Starting containers...")
 	if err := runComposeCommandWithEnv(composeDir, composeEnv, "up", "-d"); err != nil {
 		errors.FatalError(errors.NewInternalError(
@@ -134,14 +149,14 @@ Examples:
 		), globals.JSON)
 	}
 
-	// 4. Wait for Ollama and check for model
+	// 6. Wait for Ollama and check for model
 	ui.Info("Verifying embedding model...")
-	if err := ensureModel(composeDir, *timeout); err != nil {
+	if err := ensureModel(composeDir, composeEnv, *timeout); err != nil {
 		errors.FatalError(err, globals.JSON)
 	}
 	ui.Success("Embedding model is ready")
 
-	// 5. Final health check for CIE server
+	// 7. Final health check for CIE server
 	ui.Info("Waiting for CIE server to be ready...")
 	if err := waitForHealth("http://localhost:9090/health", *timeout); err != nil {
 		errors.FatalError(errors.NewNetworkError(
@@ -190,7 +205,7 @@ func runComposeCommandWithEnv(dir string, env map[string]string, args ...string)
 	return cmd.Run()
 }
 
-func ensureModel(composeDir string, timeout time.Duration) error {
+func ensureModel(composeDir string, env map[string]string, timeout time.Duration) error {
 	start := time.Now()
 	for {
 		if time.Since(start) > timeout {
@@ -227,9 +242,9 @@ func ensureModel(composeDir string, timeout time.Duration) error {
 			return nil
 		}
 
-		// Model not found, run setup
+		// Model not found, run setup (use run --rm to execute and exit cleanly)
 		ui.Info("Model 'nomic-embed-text' not found. Downloading...")
-		if err := runComposeCommand(composeDir, "--profile", "setup", "up"); err != nil {
+		if err := runComposeCommandWithEnv(composeDir, env, "run", "--rm", "ollama-setup"); err != nil {
 			return errors.NewInternalError(
 				"Setup failed",
 				"Docker Compose setup profile failed",

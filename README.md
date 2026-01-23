@@ -420,6 +420,58 @@ Need help or want to contribute?
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
+## CIE Enterprise
+
+**Scale code intelligence across your entire organization.**
+
+CIE Enterprise brings the power of semantic code search and call graph analysis to teams of any size. Built for organizations that demand reliability, security, and collaboration.
+
+### Why Enterprise?
+
+| Feature | Open Source | Enterprise |
+|---------|-------------|------------|
+| Semantic Search | ✅ | ✅ |
+| Call Graph Analysis | ✅ | ✅ |
+| Local Embeddings (768 dim) | ✅ | ✅ |
+| **Distributed Architecture** | — | ✅ |
+| **Team Collaboration** | — | ✅ |
+| **CI/CD Integration** | — | ✅ |
+| **High-Fidelity Embeddings (1536 dim)** | — | ✅ |
+| **Integrated LLMs** | — | ✅ |
+| **Priority Support** | — | ✅ |
+| **Security Compliance** | — | ✅ |
+
+### Enterprise Features
+
+🏢 **Distributed Architecture**
+Deploy CIE across your infrastructure with a Primary Hub and Edge Caches. All team members connect to the same indexed codebase with millisecond-latency queries worldwide.
+
+🤝 **Team Collaboration**
+Share code intelligence across your entire engineering organization. One index, one source of truth—no more siloed knowledge.
+
+🔄 **CI/CD Integration**
+Automatically keep your code index up-to-date with every commit. Native integration with GitHub Actions, GitLab CI, Jenkins, and more.
+
+🎯 **High-Fidelity Embeddings**
+OpenAI-powered 1536-dimension embeddings for superior semantic search accuracy. Find exactly what you're looking for, even in massive codebases.
+
+🤖 **Integrated LLMs**
+Connect your preferred LLM provider for enhanced code analysis, architectural insights, and natural language queries about your codebase.
+
+📞 **Priority Support**
+Direct access to our engineering team. SLAs, dedicated support channels, and implementation assistance.
+
+🔒 **Security & Compliance**
+Enterprise-grade security with SOC 2 compliance, SSO/SAML integration, audit logging, and data residency options.
+
+### Get Started
+
+**Contact us:** enterprise@kraklabs.com
+
+Schedule a demo to see how CIE Enterprise can transform your team's development workflow.
+
+---
+
 ## License
 
 CIE is dual-licensed:
