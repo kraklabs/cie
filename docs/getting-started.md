@@ -24,17 +24,23 @@ Before installing CIE, ensure you have these requirements:
 
 Choose the installation method that works best for you:
 
-### Option 1: Install Script (Recommended)
+### Option 1: Homebrew (Recommended)
 
-The easiest way to get the CIE CLI is using our installation script:
+The easiest way to install CIE on macOS or Linux:
+
+```bash
+brew install kraklabs/cie
+```
+
+### Option 2: Install Script
+
+Download the correct binary for your OS and architecture:
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/kraklabs/cie/main/install.sh | sh
 ```
 
-This will download the correct binary for your OS and architecture and place it in your path.
-
-### Option 2: Build from Source
+### Option 3: Build from Source
 
 If you have Go 1.24 installed, you can build the CLI yourself. Our `Makefile` automatically handles all dependencies, including the CozoDB C library:
 

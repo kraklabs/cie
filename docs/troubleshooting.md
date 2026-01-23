@@ -56,17 +56,23 @@ CIE uses CozoDB as its graph engine, which requires a C library. If the binary w
 
 **Solution:**
 
-1. **Use the Docker-based approach (Recommended):**
+1. **Install via Homebrew (Recommended):**
+   The easiest solution is to install the pre-built binary via Homebrew:
+   ```bash
+   brew install kraklabs/cie
+   ```
+
+2. **Use the Docker-based approach:**
    By using `cie start` and letting the processing happen inside Docker, you avoid all local library dependency issues.
 
-2. **Rebuild with Static Linking:**
-   If you must run the CLI locally, use the provided `Makefile` which handles library downloading and static linking automatically:
+3. **Rebuild with Static Linking:**
+   If you must build the CLI locally, use the provided `Makefile` which handles library downloading and static linking automatically:
    ```bash
    make build
    ```
 
-3. **macOS "semawakeup" fix:**
-   If you encounter a crash with `semawakeup on Darwin signal stack`, it's usually due to a conflict between Go's signal handling and the CozoDB library on macOS. We've mitigated this in the latest version by using static linking. Ensure you are using a binary built with `make build` or the one provided by `install.sh`.
+4. **macOS "semawakeup" fix:**
+   If you encounter a crash with `semawakeup on Darwin signal stack`, it's usually due to a conflict between Go's signal handling and the CozoDB library on macOS. We've mitigated this in the latest version by using static linking. Use Homebrew or the install script for pre-built binaries.
 
 ---
 
@@ -131,15 +137,18 @@ CIE uses CozoDB's C bindings (CGO). CGO must be enabled during build. If `CGO_EN
 
 **Solution:**
 
-**Build with CGO enabled:**
+**Use pre-built binary (Recommended):**
+```bash
+# Homebrew (no CGO issues)
+brew install kraklabs/cie
+```
+
+**Or build with CGO enabled:**
 ```bash
 # Set for current session
 export CGO_ENABLED=1
 
-# Install CIE
-go install github.com/kraklabs/cie/cmd/cie@latest
-
-# Or build from source (after cloning the repo)
+# Build from source (after cloning the repo)
 CGO_ENABLED=1 go build -o cie ./cmd/cie
 ```
 
@@ -341,7 +350,8 @@ Tree-sitter parsers encounter invalid syntax in source files. This can happen wi
 
    If outdated, update CIE to latest version:
    ```bash
-   go install github.com/kraklabs/cie/cmd/cie@latest
+   brew upgrade cie
+   # Or: curl -sSL https://raw.githubusercontent.com/kraklabs/cie/main/install.sh | sh
    ```
 
 **Note:** CIE gracefully skips unparseable files and continues indexing. Parse errors reduce index completeness but don't block indexing.
