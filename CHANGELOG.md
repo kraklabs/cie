@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Default indexing behavior is now incremental when possible (git repo with previous index).
 - Use `ForceReindex: true` in config to force full re-indexing.
 
+### Fixed
+- Fixed `cie index` running locally instead of using Docker server when `cie init` was run before `cie start`.
+- `cie index` now auto-detects running CIE server at `localhost:9090` even if `edge_cache` is not set in config.
+- `detectDockerCompose` now checks `~/.cie/docker-compose.yml` in addition to the project directory.
+
 ## [0.4.1] - 2026-01-23
 
 ### Fixed

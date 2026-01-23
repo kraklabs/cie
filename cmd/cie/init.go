@@ -511,20 +511,34 @@ func isCIEServerAlive(url string) bool {
 
 // detectDockerCompose checks if docker-compose.yml exists and contains CIE server configuration.
 // This is used to auto-configure edge_cache URL when running in local Docker mode.
+// Checks both the project directory and ~/.cie/ (where embedded compose is extracted).
 func detectDockerCompose(dir string) bool {
-	composePath := filepath.Join(dir, "docker-compose.yml")
-	content, err := os.ReadFile(composePath) //nolint:gosec // G304: composePath built from repo dir
-	if err != nil {
-		// Also check docker-compose.yaml
-		composePath = filepath.Join(dir, "docker-compose.yaml")
-		content, err = os.ReadFile(composePath) //nolint:gosec // G304: composePath built from repo dir
+	// List of paths to check for docker-compose.yml
+	pathsToCheck := []string{
+		filepath.Join(dir, "docker-compose.yml"),
+		filepath.Join(dir, "docker-compose.yaml"),
+	}
+
+	// Also check ~/.cie/ where embedded docker-compose is extracted (since v0.4.0)
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		pathsToCheck = append(pathsToCheck,
+			filepath.Join(homeDir, ".cie", "docker-compose.yml"),
+			filepath.Join(homeDir, ".cie", "docker-compose.yaml"),
+		)
+	}
+
+	for _, composePath := range pathsToCheck {
+		content, err := os.ReadFile(composePath) //nolint:gosec // G304: composePath built from known paths
 		if err != nil {
-			return false
+			continue
+		}
+		// Check if this compose file has CIE server (look for cie-server or port 9090)
+		contentStr := string(content)
+		if strings.Contains(contentStr, "cie-server") ||
+			strings.Contains(contentStr, "9090:8080") ||
+			strings.Contains(contentStr, "\"9090:8080\"") {
+			return true
 		}
 	}
-	// Check if this compose file has CIE server (look for cie-server or port 9090)
-	contentStr := string(content)
-	return strings.Contains(contentStr, "cie-server") ||
-		strings.Contains(contentStr, "9090:8080") ||
-		strings.Contains(contentStr, "\"9090:8080\"")
+	return false
 }

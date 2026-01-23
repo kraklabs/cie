@@ -62,6 +62,13 @@ import (
 func runIndex(args []string, configPath string, globals GlobalFlags) {
 	// Check if we should delegate to remote server
 	baseURL := os.Getenv("CIE_BASE_URL")
+	if baseURL == "" {
+		// Try to detect local Docker server
+		defaultURL := "http://localhost:9090"
+		if isCIEServerAlive(defaultURL) {
+			baseURL = defaultURL
+		}
+	}
 	if baseURL != "" {
 		runRemoteIndex(baseURL, args)
 		return
