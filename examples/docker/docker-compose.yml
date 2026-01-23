@@ -1,0 +1,97 @@
+# CIE Docker Compose Example
+#
+# This example shows how to run CIE (Code Intelligence Engine) in a containerized
+# environment with Ollama for embeddings.
+#
+# Quick Start:
+#   1. Copy .env.example to .env and customize if needed
+#   2. docker compose up -d
+#   3. docker compose exec ollama ollama pull nomic-embed-text  # One-time setup
+#   4. docker compose exec cie cie index /workspace
+#   5. docker compose exec cie cie query "what does this code do"
+#
+# For more details, see README.md
+
+version: '3.8'
+
+services:
+  # CIE Service - Code Intelligence Engine
+  cie:
+    image: ghcr.io/kraklabs/cie:latest
+    container_name: cie
+
+    volumes:
+      # Mount your source code (read-only for security)
+      - ./code:/workspace:ro
+
+      # Persistent data directory for index and config
+      - cie-data:/data
+
+      # Optional: Mount custom config file
+      # - ./.cie/project.yaml:/data/.cie/project.yaml:ro
+
+    environment:
+      # Required: Project identifier
+      - CIE_PROJECT_ID=${CIE_PROJECT_ID:-my-project}
+
+      # Config file location (inside container)
+      - CIE_CONFIG_PATH=/data/.cie/project.yaml
+
+      # Logging level (debug, info, warn, error)
+      - CIE_LOG_LEVEL=${CIE_LOG_LEVEL:-info}
+
+      # Ollama configuration for embeddings
+      - OLLAMA_HOST=http://ollama:11434
+      - OLLAMA_EMBED_MODEL=${OLLAMA_EMBED_MODEL:-nomic-embed-text}
+
+      # Optional: LLM for narrative generation
+      # - CIE_LLM_URL=http://ollama:11434
+      # - CIE_LLM_MODEL=llama3
+
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+    networks:
+      - cie-network
+
+    restart: unless-stopped
+
+    # Optional: Expose HTTP API if running in Edge Cache mode
+    # ports:
+    #   - "8080:8080"
+
+  # Ollama Service - Embedding Generation
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+
+    volumes:
+      # Persistent storage for models (~1GB per model)
+      - ollama-data:/root/.ollama
+
+    ports:
+      - "11434:11434"
+
+    networks:
+      - cie-network
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    restart: unless-stopped
+
+networks:
+  cie-network:
+    driver: bridge
+
+volumes:
+  # CIE index and configuration data
+  cie-data:
+
+  # Ollama models and cache
+  ollama-data:

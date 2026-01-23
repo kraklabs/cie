@@ -1,0 +1,29 @@
+{
+  "matches": [
+    {
+      "file_path": "internal/handlers/auth.go",
+      "line_number": 45,
+      "line_content": "\treturn jwt.GenerateToken(user.ID)",
+      "match_start": 8,
+      "match_end": 26
+    },
+    {
+      "file_path": "internal/middleware/auth.go",
+      "line_number": 32,
+      "line_content": "\ttoken, err := jwt.GenerateToken(claims)",
+      "match_start": 15,
+      "match_end": 33
+    },
+    {
+      "file_path": "pkg/auth/token.go",
+      "line_number": 22,
+      "line_content": "// GenerateToken creates a new JWT token",
+      "match_start": 3,
+      "match_end": 21
+    }
+  ],
+  "pattern": "GenerateToken",
+  "total_matches": 3,
+  "files_searched": 127,
+  "processing_time_ms": 12
+}

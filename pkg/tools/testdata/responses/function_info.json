@@ -1,0 +1,37 @@
+{
+  "function": {
+    "name": "BuildRouter",
+    "file_path": "internal/http/router.go",
+    "line": 18,
+    "end_line": 42,
+    "signature": "func BuildRouter(config *Config) *chi.Mux",
+    "language": "go",
+    "role": "router",
+    "visibility": "exported",
+    "complexity": 5,
+    "calls": [
+      "chi.NewRouter",
+      "r.Use",
+      "r.Get",
+      "r.Post",
+      "RegisterHealthRoutes",
+      "RegisterAPIRoutes"
+    ],
+    "called_by": [
+      "main.main",
+      "setupServer"
+    ],
+    "parameters": [
+      {
+        "name": "config",
+        "type": "*Config"
+      }
+    ],
+    "returns": [
+      {
+        "type": "*chi.Mux"
+      }
+    ],
+    "doc_comment": "BuildRouter creates and configures the HTTP router with all middleware and routes."
+  }
+}

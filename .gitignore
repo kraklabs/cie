@@ -1,0 +1,36 @@
+# Binaries
+/cie
+/bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Build artifacts
+/dist/
+
+# Test artifacts
+coverage.out
+coverage*.out
+*.test
+test-output*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# CIE data directories (local)
+.cie/db/
+
+# Temporary files
+*.tmp
+*.bak
+
+# CIE configuration
+.cie/

@@ -1,0 +1,35 @@
+# .dockerignore
+
+# Git
+.git
+.gitignore
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Build artifacts
+bin/
+dist/
+coverage.out
+*.test
+
+# Documentation (not needed in image)
+docs/
+*.md
+!README.md
+
+# Specs and development files
+.specs/
+.github/
+
+# Local data
+.cie/
+*.db
+*.sqlite
+
+# OS files
+.DS_Store
+Thumbs.db

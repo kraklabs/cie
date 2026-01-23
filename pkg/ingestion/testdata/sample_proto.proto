@@ -1,0 +1,45 @@
+// Sample Protocol Buffers file for parser testing
+syntax = "proto3";
+
+package sample;
+
+option go_package = "github.com/kraklabs/kraken/pkg/sample";
+
+// User represents a user in the system.
+message User {
+  int64 id = 1;
+  string name = 2;
+  string email = 3;
+  repeated string roles = 4;
+}
+
+// CreateUserRequest is the request for creating a new user.
+message CreateUserRequest {
+  string name = 1;
+  string email = 2;
+  repeated string roles = 3;
+}
+
+// CreateUserResponse is the response after creating a user.
+message CreateUserResponse {
+  User user = 1;
+}
+
+// GetUserRequest is the request for retrieving a user.
+message GetUserRequest {
+  int64 id = 1;
+}
+
+// GetUserResponse is the response containing user data.
+message GetUserResponse {
+  User user = 1;
+}
+
+// UserService provides user management operations.
+service UserService {
+  // CreateUser creates a new user in the system.
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+
+  // GetUser retrieves a user by ID.
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+}

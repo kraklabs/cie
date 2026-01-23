@@ -1,0 +1,285 @@
+# Copyright 2025 KrakLabs
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Release workflow for CIE
+#
+# Triggers on version tags: v*.*.*
+# Uploads binaries directly to release (no artifacts needed)
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  COZO_VERSION: "0.7.6"
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      version: ${{ steps.version.outputs.VERSION }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          draft: true
+          prerelease: ${{ contains(github.ref, '-') }}
+          generate_release_notes: true
+          body: |
+            ## CIE ${{ steps.version.outputs.VERSION }}
+
+            Code Intelligence Engine - semantic search and call graph analysis for your codebase.
+
+            ### Quick Install
+
+            **Script (recommended):**
+            ```bash
+            curl -sSL https://raw.githubusercontent.com/kraklabs/cie/main/install.sh | sh
+            ```
+
+            **Homebrew (macOS/Linux):**
+            ```bash
+            brew install kraklabs/cie
+            ```
+
+            **Manual Download:**
+            Download the appropriate binary for your platform below.
+
+            ### Getting Started
+
+            ```bash
+            cd your-project
+            cie init
+            cie start
+            cie index
+            cie status
+            ```
+
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build:
+    name: Build ${{ matrix.os }}-${{ matrix.arch }}
+    needs: create-release
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+            runner: ubuntu-latest
+            cozo_platform: x86_64-unknown-linux-gnu
+          - os: linux
+            arch: arm64
+            runner: ubuntu-24.04-arm
+            cozo_platform: aarch64-unknown-linux-gnu
+          - os: darwin
+            arch: arm64
+            runner: macos-latest
+            cozo_platform: aarch64-apple-darwin
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+
+      - name: Install Linux dependencies
+        if: matrix.os == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc g++
+
+      - name: Download CozoDB library
+        env:
+          COZO_PLATFORM: ${{ matrix.cozo_platform }}
+        run: |
+          curl -L "https://github.com/cozodb/cozo/releases/download/v${COZO_VERSION}/libcozo_c-${COZO_VERSION}-${COZO_PLATFORM}.a.gz" -o /tmp/libcozo_c.a.gz
+          gunzip /tmp/libcozo_c.a.gz
+          sudo mkdir -p /usr/local/lib
+          sudo cp /tmp/libcozo_c.a /usr/local/lib/libcozo_c.a
+
+      - name: Build binary
+        env:
+          CGO_ENABLED: "1"
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          BUILD_OS: ${{ matrix.os }}
+          BUILD_ARCH: ${{ matrix.arch }}
+          VERSION: ${{ needs.create-release.outputs.version }}
+        run: |
+          COMMIT=$(git rev-parse --short HEAD)
+          DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          go build -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
+            -o "cie-${BUILD_OS}-${BUILD_ARCH}" \
+            ./cmd/cie
+
+          # Create archive
+          tar -czvf "cie_${VERSION}_${BUILD_OS}_${BUILD_ARCH}.tar.gz" \
+            "cie-${BUILD_OS}-${BUILD_ARCH}" \
+            LICENSE README.md
+
+          # Generate checksum
+          if [ "${BUILD_OS}" = "darwin" ]; then
+            shasum -a 256 "cie_${VERSION}_${BUILD_OS}_${BUILD_ARCH}.tar.gz" > "cie_${VERSION}_${BUILD_OS}_${BUILD_ARCH}.tar.gz.sha256"
+          else
+            sha256sum "cie_${VERSION}_${BUILD_OS}_${BUILD_ARCH}.tar.gz" > "cie_${VERSION}_${BUILD_OS}_${BUILD_ARCH}.tar.gz.sha256"
+          fi
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            cie_*.tar.gz
+            cie_*.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  finalize:
+    name: Finalize Release
+    needs: [create-release, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download checksums from release
+        env:
+          VERSION: ${{ needs.create-release.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Wait a moment for uploads to complete
+          sleep 5
+
+          # Download all sha256 files
+          gh release download "${VERSION}" --repo kraklabs/cie --pattern "*.sha256" --dir .
+
+          # Combine into checksums.txt
+          cat *.sha256 > checksums.txt
+          cat checksums.txt
+
+      - name: Upload combined checksums
+        uses: softprops/action-gh-release@v1
+        with:
+          files: checksums.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish release (remove draft)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.create-release.outputs.version }}
+        run: |
+          gh release edit "${VERSION}" --repo kraklabs/cie --draft=false
+
+  homebrew:
+    name: Update Homebrew Tap
+    needs: [create-release, finalize]
+    runs-on: ubuntu-latest
+    if: ${{ !contains(github.ref, '-') }}
+    steps:
+      - name: Checkout tap
+        uses: actions/checkout@v4
+        with:
+          repository: kraklabs/homebrew-cie
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-cie
+
+      - name: Get version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download checksums
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          # Wait for release to be fully published
+          sleep 5
+          curl -L "https://github.com/kraklabs/cie/releases/download/v${RELEASE_VERSION}/checksums.txt" -o checksums.txt
+          cat checksums.txt
+
+      - name: Update formula
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          # Extract SHA256 for each platform
+          LINUX_AMD64_SHA=$(grep linux_amd64 checksums.txt | awk '{print $1}')
+          LINUX_ARM64_SHA=$(grep linux_arm64 checksums.txt | awk '{print $1}')
+          DARWIN_ARM64_SHA=$(grep darwin_arm64 checksums.txt | awk '{print $1}')
+
+          cat > homebrew-cie/Formula/cie.rb << 'FORMULA'
+          # Copyright 2025 KrakLabs
+          # SPDX-License-Identifier: AGPL-3.0-or-later
+
+          class Cie < Formula
+            desc "Code Intelligence Engine - semantic search and call graph analysis"
+            homepage "https://github.com/kraklabs/cie"
+            version "RELEASE_VERSION_PLACEHOLDER"
+            license "AGPL-3.0-or-later"
+
+            on_macos do
+              on_arm do
+                url "https://github.com/kraklabs/cie/releases/download/vRELEASE_VERSION_PLACEHOLDER/cie_vRELEASE_VERSION_PLACEHOLDER_darwin_arm64.tar.gz"
+                sha256 "DARWIN_ARM64_SHA_PLACEHOLDER"
+              end
+            end
+
+            on_linux do
+              on_intel do
+                url "https://github.com/kraklabs/cie/releases/download/vRELEASE_VERSION_PLACEHOLDER/cie_vRELEASE_VERSION_PLACEHOLDER_linux_amd64.tar.gz"
+                sha256 "LINUX_AMD64_SHA_PLACEHOLDER"
+              end
+              on_arm do
+                url "https://github.com/kraklabs/cie/releases/download/vRELEASE_VERSION_PLACEHOLDER/cie_vRELEASE_VERSION_PLACEHOLDER_linux_arm64.tar.gz"
+                sha256 "LINUX_ARM64_SHA_PLACEHOLDER"
+              end
+            end
+
+            def install
+              bin.install Dir["cie-*"].first => "cie"
+            end
+
+            test do
+              system "#{bin}/cie", "--version"
+            end
+          end
+          FORMULA
+
+          # Replace placeholders
+          sed -i "s/RELEASE_VERSION_PLACEHOLDER/${RELEASE_VERSION}/g" homebrew-cie/Formula/cie.rb
+          sed -i "s/DARWIN_ARM64_SHA_PLACEHOLDER/${DARWIN_ARM64_SHA}/g" homebrew-cie/Formula/cie.rb
+          sed -i "s/LINUX_AMD64_SHA_PLACEHOLDER/${LINUX_AMD64_SHA}/g" homebrew-cie/Formula/cie.rb
+          sed -i "s/LINUX_ARM64_SHA_PLACEHOLDER/${LINUX_ARM64_SHA}/g" homebrew-cie/Formula/cie.rb
+
+          cat homebrew-cie/Formula/cie.rb
+
+      - name: Commit and push
+        run: |
+          cd homebrew-cie
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add Formula/cie.rb
+          git commit -m "Update cie to v${{ steps.version.outputs.VERSION }}"
+          git push

@@ -1,0 +1,29 @@
+[
+  {
+    "id": "func_handle_request",
+    "name": "HandleRequest",
+    "signature": "func HandleRequest(ctx context.Context, req *Request) (*Response, error)",
+    "file_path": "/internal/handler.go",
+    "code": "func HandleRequest(ctx context.Context, req *Request) (*Response, error) {\n\tif req == nil {\n\t\treturn nil, errors.New(\"request is nil\")\n\t}\n\treturn &Response{Status: \"ok\"}, nil\n}",
+    "start_line": 42,
+    "end_line": 47
+  },
+  {
+    "id": "func_process_data",
+    "name": "ProcessData",
+    "signature": "func ProcessData(data []byte) error",
+    "file_path": "/internal/processor.go",
+    "code": "func ProcessData(data []byte) error {\n\tif len(data) == 0 {\n\t\treturn errors.New(\"empty data\")\n\t}\n\treturn nil\n}",
+    "start_line": 15,
+    "end_line": 20
+  },
+  {
+    "id": "func_init_service",
+    "name": "InitService",
+    "signature": "func InitService(config *Config) (*Service, error)",
+    "file_path": "/pkg/service/service.go",
+    "code": "func InitService(config *Config) (*Service, error) {\n\tif config == nil {\n\t\treturn nil, errors.New(\"config is nil\")\n\t}\n\treturn &Service{config: config}, nil\n}",
+    "start_line": 25,
+    "end_line": 30
+  }
+]

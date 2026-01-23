@@ -1,0 +1,91 @@
+# Copyright 2025 KrakLabs
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# golangci-lint v2 Configuration
+# golangci-lint configuration for CIE - Code Intelligence Engine
+#
+# Run:     golangci-lint run ./...
+# Install: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+# Docs:    https://golangci-lint.run/usage/configuration/
+
+version: "2"
+
+run:
+  go: "1.24"
+  tests: true
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - errcheck
+    - gocognit
+    - gocyclo
+    - gosec
+    - govet
+    - ineffassign
+    - misspell
+    - nilerr
+    - sqlclosecheck
+    - staticcheck
+    - unconvert
+    - unused
+    - whitespace
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: false
+    gocognit:
+      min-complexity: 30
+    gocyclo:
+      min-complexity: 20
+    gosec:
+      excludes:
+        - G104
+    govet:
+      disable:
+        - fieldalignment
+      enable-all: true
+    misspell:
+      locale: US
+    staticcheck:
+      checks:
+        - all
+        - -SA1019
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - errcheck
+          - gocognit
+          - gocyclo
+          - gosec
+        path: _test\.go
+      - linters:
+          - govet
+        text: 'shadow: declaration of "err"'
+      - linters:
+          - govet
+        text: 'shadow: declaration of "ctx"'
+      - linters:
+          - all
+        path: .*\.pb\.go$
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+issues:
+  max-issues-per-linter: 50
+  max-same-issues: 10
+  new: false
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

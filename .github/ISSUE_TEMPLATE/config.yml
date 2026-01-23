@@ -1,0 +1,15 @@
+# Copyright 2025 KrakLabs
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Issue Template Configuration
+# Configuration for issue templates
+
+blank_issues_enabled: false
+
+contact_links:
+  - name: Documentation
+    url: https://github.com/kraklabs/cie/tree/main/docs
+    about: Check the documentation before opening an issue
+  - name: Discussions
+    url: https://github.com/kraklabs/cie/discussions
+    about: Ask questions or discuss ideas in GitHub Discussions
