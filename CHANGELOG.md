@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.7] - 2026-01-23
+
+### Fixed
+- Fixed Docker image tags to include `v` prefix (e.g., `v0.4.7`) matching CLI version.
+
 ## [0.4.6] - 2026-01-23
 
 ### Changed
@@ -155,7 +160,8 @@ Initial open source release of CIE (Code Intelligence Engine).
 - No hardcoded credentials in codebase
 - All API keys via environment variables only
 
-[unreleased]: https://github.com/kraklabs/cie/compare/v0.4.6...HEAD
+[unreleased]: https://github.com/kraklabs/cie/compare/v0.4.7...HEAD
+[0.4.7]: https://github.com/kraklabs/cie/compare/v0.4.6...v0.4.7
 [0.4.6]: https://github.com/kraklabs/cie/compare/v0.4.5...v0.4.6
 [0.4.5]: https://github.com/kraklabs/cie/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/kraklabs/cie/compare/v0.4.3...v0.4.4
