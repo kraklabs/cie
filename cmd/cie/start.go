@@ -4,11 +4,13 @@
 package main
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,6 +19,39 @@ import (
 	"github.com/kraklabs/cie/internal/errors"
 	"github.com/kraklabs/cie/internal/ui"
 )
+
+//go:embed embed/docker-compose.yml
+var embeddedDockerCompose []byte
+
+// getCIEDir returns the path to ~/.cie directory, creating it if needed.
+func getCIEDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	cieDir := filepath.Join(home, ".cie")
+	if err := os.MkdirAll(cieDir, 0750); err != nil {
+		return "", err
+	}
+	return cieDir, nil
+}
+
+// ensureDockerCompose extracts the embedded docker-compose.yml to ~/.cie/
+func ensureDockerCompose() (string, error) {
+	cieDir, err := getCIEDir()
+	if err != nil {
+		return "", err
+	}
+
+	composePath := filepath.Join(cieDir, "docker-compose.yml")
+
+	// Always write the embedded compose file to ensure it's up to date
+	if err := os.WriteFile(composePath, embeddedDockerCompose, 0640); err != nil {
+		return "", fmt.Errorf("failed to write docker-compose.yml: %w", err)
+	}
+
+	return cieDir, nil
+}
 
 // runStart executes the 'start' CLI command, which manages the Docker infrastructure.
 // It checks if Docker is running, starts the services, performs setup if needed,
@@ -34,6 +69,8 @@ Description:
   2. Starts the Ollama and CIE Server containers.
   3. Checks if the embedding model is installed, running setup if necessary.
   4. Waits for all services to be healthy.
+
+  The docker-compose.yml is embedded in the binary and extracted to ~/.cie/
 
 Options:
 `)
@@ -57,31 +94,42 @@ Examples:
 	}
 	ui.Success("Docker is running")
 
-	// 2. Run docker compose up -d
-	ui.Info("Starting containers...")
-	if err := runCommand("docker", "compose", "up", "-d"); err != nil {
+	// 2. Extract embedded docker-compose.yml
+	composeDir, err := ensureDockerCompose()
+	if err != nil {
 		errors.FatalError(errors.NewInternalError(
-			"Failed to start containers",
-			"Docker Compose up failed",
-			"Check docker-compose.yml and your Docker logs",
+			"Failed to extract docker-compose.yml",
+			err.Error(),
+			"Check that ~/.cie/ is writable",
 			err,
 		), globals.JSON)
 	}
 
-	// 3. Wait for Ollama and check for model
+	// 3. Run docker compose up -d from ~/.cie/
+	ui.Info("Starting containers...")
+	if err := runComposeCommand(composeDir, "up", "-d"); err != nil {
+		errors.FatalError(errors.NewInternalError(
+			"Failed to start containers",
+			"Docker Compose up failed",
+			"Check Docker logs with: docker compose -f ~/.cie/docker-compose.yml logs",
+			err,
+		), globals.JSON)
+	}
+
+	// 4. Wait for Ollama and check for model
 	ui.Info("Verifying embedding model...")
-	if err := ensureModel(*timeout); err != nil {
+	if err := ensureModel(composeDir, *timeout); err != nil {
 		errors.FatalError(err, globals.JSON)
 	}
 	ui.Success("Embedding model is ready")
 
-	// 4. Final health check for CIE server
+	// 5. Final health check for CIE server
 	ui.Info("Waiting for CIE server to be ready...")
 	if err := waitForHealth("http://localhost:9090/health", *timeout); err != nil {
 		errors.FatalError(errors.NewNetworkError(
 			"CIE server health check failed",
 			"The server did not become healthy within the timeout",
-			"Check server logs with: docker compose logs cie-server",
+			"Check server logs with: docker compose -f ~/.cie/docker-compose.yml logs cie-server",
 			err,
 		), globals.JSON)
 	}
@@ -89,6 +137,7 @@ Examples:
 	ui.Success("CIE infrastructure is up and running!")
 	fmt.Println()
 	fmt.Println("Next steps:")
+	fmt.Println("  cie init     Initialize your project")
 	fmt.Println("  cie index    Index your repository")
 	fmt.Println("  cie status   Check indexing status")
 }
@@ -106,14 +155,15 @@ func checkDocker() error {
 	return nil
 }
 
-func runCommand(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
+func runComposeCommand(dir string, args ...string) error {
+	cmdArgs := append([]string{"compose", "-f", filepath.Join(dir, "docker-compose.yml")}, args...)
+	cmd := exec.Command("docker", cmdArgs...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
-func ensureModel(timeout time.Duration) error {
+func ensureModel(composeDir string, timeout time.Duration) error {
 	start := time.Now()
 	for {
 		if time.Since(start) > timeout {
@@ -151,8 +201,8 @@ func ensureModel(timeout time.Duration) error {
 		}
 
 		// Model not found, run setup
-		ui.Info("Model 'nomic-embed-text' not found. Running setup...")
-		if err := runCommand("docker", "compose", "--profile", "setup", "up"); err != nil {
+		ui.Info("Model 'nomic-embed-text' not found. Downloading...")
+		if err := runComposeCommand(composeDir, "--profile", "setup", "up"); err != nil {
 			return errors.NewInternalError(
 				"Setup failed",
 				"Docker Compose setup profile failed",

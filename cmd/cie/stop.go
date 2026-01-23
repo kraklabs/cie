@@ -6,6 +6,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	flag "github.com/spf13/pflag"
 
@@ -39,6 +40,25 @@ Examples:
 		os.Exit(1)
 	}
 
+	composeDir, err := getCIEDir()
+	if err != nil {
+		errors.FatalError(errors.NewInternalError(
+			"Failed to find CIE directory",
+			err.Error(),
+			"Run 'cie start' first",
+			err,
+		), globals.JSON)
+	}
+
+	composePath := filepath.Join(composeDir, "docker-compose.yml")
+	if _, err := os.Stat(composePath); os.IsNotExist(err) {
+		errors.FatalError(errors.NewInputError(
+			"CIE infrastructure not initialized",
+			"docker-compose.yml not found in ~/.cie/",
+			"Run 'cie start' first to initialize the infrastructure",
+		), globals.JSON)
+	}
+
 	ui.Header("Stopping CIE Infrastructure")
 
 	// Check if docker is running
@@ -46,12 +66,12 @@ Examples:
 		errors.FatalError(err, globals.JSON)
 	}
 
-	// Run docker compose down
+	// Run docker compose stop
 	ui.Info("Stopping containers...")
-	if err := runCommand("docker", "compose", "down"); err != nil {
+	if err := runComposeCommand(composeDir, "stop"); err != nil {
 		errors.FatalError(errors.NewInternalError(
 			"Failed to stop containers",
-			"Docker Compose down failed",
+			"Docker Compose stop failed",
 			"Check Docker logs for details",
 			err,
 		), globals.JSON)

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-01-23
+
+### Added
+- Docker image published to GitHub Container Registry (`ghcr.io/kraklabs/cie`).
+- Multi-platform Docker images (linux/amd64, linux/arm64) built with Docker Buildx.
+- Embedded `docker-compose.yml` in CIE binary - no need to clone repository.
+- `cie start` now extracts docker-compose to `~/.cie/` automatically.
+
+### Changed
+- Simplified installation: `brew install` + `cie start` works without cloning repo.
+- Docker Compose now uses published `ghcr.io/kraklabs/cie:latest` image.
+- Updated README Quick Start to a 2-step process.
+- Added `brew tap kraklabs/cie` to all documentation.
+
+### Fixed
+- Fixed `cie start` failing when docker-compose.yml not found in current directory.
+
 ## [0.3.1] - 2026-01-23
 
 ### Fixed
@@ -84,7 +101,8 @@ Initial open source release of CIE (Code Intelligence Engine).
 - No hardcoded credentials in codebase
 - All API keys via environment variables only
 
-[unreleased]: https://github.com/kraklabs/cie/compare/v0.3.1...HEAD
+[unreleased]: https://github.com/kraklabs/cie/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/kraklabs/cie/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/kraklabs/cie/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/kraklabs/cie/compare/v0.1.0...v0.3.0
 [0.1.0]: https://github.com/kraklabs/cie/releases/tag/v0.1.0

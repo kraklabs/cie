@@ -1,0 +1,69 @@
+# CIE Infrastructure
+# This file is embedded in the CIE binary and extracted to ~/.cie/
+# Do not edit - it will be overwritten on next cie start
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: cie-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - cie-network
+    restart: unless-stopped
+
+  ollama-setup:
+    image: curlimages/curl:latest
+    container_name: cie-ollama-setup
+    depends_on:
+      ollama:
+        condition: service_healthy
+    networks:
+      - cie-network
+    command: >
+      sh -c "
+        echo 'Pulling nomic-embed-text model...' &&
+        curl -X POST http://ollama:11434/api/pull -d '{\"name\": \"nomic-embed-text\"}' &&
+        echo 'Model ready!'
+      "
+    profiles:
+      - setup
+
+  cie-server:
+    image: ghcr.io/kraklabs/cie:latest
+    container_name: cie-server
+    user: "0:0"
+    ports:
+      - "9090:8080"
+    volumes:
+      - cie-data:/data
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_EMBED_MODEL: nomic-embed-text
+      CIE_DATA_DIR: /data
+    depends_on:
+      ollama:
+        condition: service_healthy
+    networks:
+      - cie-network
+    command: ["serve", "--port", "8080"]
+    restart: unless-stopped
+
+volumes:
+  ollama-data:
+    name: cie-ollama-data
+  cie-data:
+    name: cie-data
+
+networks:
+  cie-network:
+    name: cie-network
+    driver: bridge

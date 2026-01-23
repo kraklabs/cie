@@ -1,20 +1,4 @@
 // Copyright 2025 KrakLabs
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Affero General Public License as published
-// by the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Affero General Public License for more details.
-//
-// You should have received a copy of the GNU Affero General Public License
-// along with this program. If not, see <https://www.gnu.org/licenses/>.
-//
-// For commercial licensing, contact: licensing@kraklabs.com
-//
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 package main
@@ -31,18 +15,6 @@ import (
 )
 
 // runReset executes the 'reset' CLI command, deleting all local indexed data.
-//
-// This is a destructive operation that removes the entire ~/.cie/data/<project_id>/
-// directory, clearing all locally stored index data, embeddings, and cached state.
-//
-// The user must explicitly confirm with the --yes flag to prevent accidental data loss.
-//
-// Flags:
-//   - --yes: Required confirmation flag (no default)
-//
-// Examples:
-//
-//	cie reset --yes    Delete all local data (destructive!)
 func runReset(args []string, configPath string, globals GlobalFlags) {
 	fs := flag.NewFlagSet("reset", flag.ExitOnError)
 	confirm := fs.Bool("yes", false, "Confirm the reset (required)")
@@ -95,48 +67,54 @@ Notes:
 		), false)
 	}
 
-	// Reset Docker if requested
-	if *docker {
-		ui.Header("Resetting Docker Infrastructure")
-
-		if err := checkDocker(); err != nil {
-			errors.FatalError(err, globals.JSON)
-		}
-
-		ui.Info("Stopping containers and removing volumes...")
-		if err := runCommand("docker", "compose", "down", "-v"); err != nil {
-			errors.FatalError(errors.NewInternalError(
-				"Failed to reset Docker infrastructure",
-				"Docker Compose down -v failed",
-				"Check Docker logs for details",
-				err,
-			), globals.JSON)
-		}
-		ui.Success("Docker infrastructure reset")
+	composeDir, err := getCIEDir()
+	if err != nil {
+		errors.FatalError(errors.NewInternalError(
+			"Failed to find CIE directory",
+			err.Error(),
+			"",
+			err,
+		), globals.JSON)
 	}
 
-	// Load configuration
+	// Reset Docker if requested
+	if *docker {
+		composePath := filepath.Join(composeDir, "docker-compose.yml")
+		if _, err := os.Stat(composePath); err == nil {
+			ui.Header("Resetting Docker Infrastructure")
+
+			if err := checkDocker(); err != nil {
+				errors.FatalError(err, globals.JSON)
+			}
+
+			ui.Info("Stopping containers and removing volumes...")
+			if err := runComposeCommand(composeDir, "down", "-v"); err != nil {
+				ui.Warningf("Failed to reset Docker infrastructure: %v", err)
+			} else {
+				ui.Success("Docker infrastructure reset")
+			}
+		}
+	}
+
+	// Load configuration to get project ID
 	cfg, err := LoadConfig(configPath)
 	if err != nil {
-		errors.FatalError(err, false) // LoadConfig returns UserError
+		// If no config, just clean up the data directory
+		dataDir := filepath.Join(composeDir, "data")
+		if err := os.RemoveAll(dataDir); err != nil {
+			ui.Warningf("Failed to remove data directory: %v", err)
+		}
+		ui.Success("CIE data reset complete")
+		return
 	}
 
 	// Determine data directory
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		errors.FatalError(errors.NewInternalError(
-			"Cannot determine home directory",
-			"Operating system failed to provide user home directory path",
-			"Check your system configuration or set the HOME environment variable",
-			err,
-		), false)
-	}
-	dataDir := filepath.Join(homeDir, ".cie", "data", cfg.ProjectID)
+	dataDir := filepath.Join(composeDir, "data", cfg.ProjectID)
 
 	// Check if data directory exists
 	if _, err := os.Stat(dataDir); os.IsNotExist(err) {
 		fmt.Fprintf(os.Stderr, "No local data found for project %s\n", cfg.ProjectID)
-		os.Exit(0)
+		return
 	}
 
 	fmt.Printf("Resetting project %s (deleting %s)...\n", cfg.ProjectID, dataDir)
@@ -151,8 +129,8 @@ Notes:
 		), false)
 	}
 
-	fmt.Println("Reset complete. All local indexed data has been deleted.")
+	ui.Success("Reset complete. All local indexed data has been deleted.")
 	fmt.Println()
 	fmt.Println("Next steps:")
-	fmt.Println("  cie index --full    Reindex the project")
+	fmt.Println("  cie index    Reindex the project")
 }
