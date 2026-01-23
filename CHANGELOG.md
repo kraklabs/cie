@@ -7,10 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-01-23
+
+### Fixed
+- Added QEMU setup to Docker build workflow for proper ARM64 CGO compilation with tree-sitter.
+
 ## [0.4.4] - 2026-01-23
 
 ### Fixed
-- Fixed tree-sitter parser not being used on ARM64 Linux (Docker on Apple Silicon). Previously always fell back to simplified parser which extracted fewer functions (~9k vs ~15k). Now tries tree-sitter first.
+- Fixed tree-sitter parser not being used on ARM64 Linux (Docker on Apple Silicon). Previously always fell back to simplified parser which extracts ~40% fewer functions. Now tries tree-sitter first.
 
 ## [0.4.3] - 2026-01-23
 
@@ -140,7 +145,8 @@ Initial open source release of CIE (Code Intelligence Engine).
 - No hardcoded credentials in codebase
 - All API keys via environment variables only
 
-[unreleased]: https://github.com/kraklabs/cie/compare/v0.4.4...HEAD
+[unreleased]: https://github.com/kraklabs/cie/compare/v0.4.5...HEAD
+[0.4.5]: https://github.com/kraklabs/cie/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/kraklabs/cie/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/kraklabs/cie/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/kraklabs/cie/compare/v0.4.1...v0.4.2
