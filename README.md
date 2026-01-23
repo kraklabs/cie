@@ -100,47 +100,44 @@ Supports Go, Python, JavaScript, TypeScript, and more through Tree-sitter parser
 
 ## Quick Start
 
-### 1. Start the Infrastructure
-
-CIE runs as a server in Docker with Ollama for embeddings. You can use the `start` command to automate everything:
-
-```bash
-# Clone the repository
-git clone https://github.com/kraklabs/cie.git
-cd cie
-
-# Start the infrastructure (Ollama + CIE Server + Model setup)
-cie start
-
-# Other infrastructure commands:
-# cie stop              Stop containers (preserves data)
-# cie reset --yes       Delete all indexed data
-# cie reset --yes --docker  Full reset including Docker volumes
-```
-
-### 2. Install the CLI
-
-**Script (recommended):**
-```bash
-curl -sSL https://raw.githubusercontent.com/kraklabs/cie/main/install.sh | sh
-```
+### 1. Install the CLI
 
 **Homebrew (macOS/Linux):**
 ```bash
 brew install kraklabs/cie
 ```
 
+**Script:**
+```bash
+curl -sSL https://raw.githubusercontent.com/kraklabs/cie/main/install.sh | sh
+```
+
 **Manual download:**
 Download from [GitHub Releases](https://github.com/kraklabs/cie/releases/latest)
 
-### 3. Index Your Repository
+### 2. Clone and Start Infrastructure
+
+CIE runs as a server in Docker with Ollama for embeddings:
+
+```bash
+# Clone the repository (contains docker-compose.yml)
+git clone https://github.com/kraklabs/cie.git
+cd cie
+
+# Start the infrastructure (Ollama + CIE Server + Model setup)
+cie start
+```
+
+### 3. Initialize and Index Your Repository
 
 ```bash
 # Navigate to your project
 cd /path/to/your/repo
 
-# Initialize and index (cie init automatically detects the Docker server)
+# Initialize project configuration
 cie init -y
+
+# Index the codebase
 cie index
 
 # Check status
@@ -160,6 +157,15 @@ Last indexed: 2 minutes ago
 
 **"Connection refused"** - Ensure infrastructure is running: `cie start`
 **"CIE_BASE_URL not set"** - The CLI should detect it if `cie init` was run correctly, but you can export it manually: `export CIE_BASE_URL=http://localhost:9090`
+
+### Infrastructure Management
+
+| Command | Description |
+|---------|-------------|
+| `cie start` | Start Docker containers (Ollama + CIE Server) |
+| `cie stop` | Stop containers (preserves indexed data) |
+| `cie reset --yes` | Delete all indexed data |
+| `cie reset --yes --docker` | Full reset including Docker volumes |
 
 ### MCP Server Mode
 
