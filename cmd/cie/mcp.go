@@ -32,7 +32,7 @@ import (
 )
 
 const (
-	mcpVersion    = "1.4.0" // Added multi-pattern grep, verify_absence tool, improved endpoints summary
+	mcpVersion    = "1.5.0" // Added git history tools: cie_function_history, cie_find_introduction, cie_blame_function
 	mcpServerName = "cie"
 )
 
@@ -123,12 +123,14 @@ type mcpContent struct {
 // mcpServer maintains state for the running MCP server instance.
 //
 // Holds the CIE client for database queries, embedding configuration for
-// semantic search, and custom role patterns from the project configuration.
+// semantic search, custom role patterns from the project configuration,
+// and git executor for git history tools.
 type mcpServer struct {
 	client         *tools.CIEClient
 	embeddingURL   string
 	embeddingModel string
 	customRoles    map[string]RolePattern // Custom role patterns from config
+	gitExecutor    tools.GitRunner        // Git executor for history tools (may be nil)
 }
 
 // runMCPServer starts the CIE Model Context Protocol server.
@@ -241,6 +243,27 @@ func runMCPServer(configPath string) {
 		embeddingURL:   cfg.Embedding.BaseURL,
 		embeddingModel: cfg.Embedding.Model,
 		customRoles:    cfg.Roles.Custom,
+	}
+
+	// Initialize git executor for git history tools
+	// Use the config file location to discover the repo root
+	if configPath != "" {
+		gitExec, gitErr := tools.NewGitExecutor(configPath)
+		if gitErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Git history tools disabled: %v\n", gitErr)
+		} else {
+			server.gitExecutor = gitExec
+			fmt.Fprintf(os.Stderr, "  Git repo: %s\n", gitExec.RepoPath())
+		}
+	} else {
+		// Try current directory
+		gitExec, gitErr := tools.NewGitExecutor(cwd)
+		if gitErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Git history tools disabled: %v\n", gitErr)
+		} else {
+			server.gitExecutor = gitExec
+			fmt.Fprintf(os.Stderr, "  Git repo: %s\n", gitExec.RepoPath())
+		}
 	}
 
 	fmt.Fprintf(os.Stderr, "CIE MCP Server v%s starting...\n", mcpVersion)
@@ -830,6 +853,78 @@ func (s *mcpServer) getTools() []mcpTool {
 				"required": []string{"target"},
 			},
 		},
+		{
+			Name:        "cie_function_history",
+			Description: "Get git commit history for a specific function. Tracks changes to the function over time using line-based git history. Useful for understanding when and why a function was modified.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"function_name": map[string]any{
+						"type":        "string",
+						"description": "Name of the function to get history for (e.g., 'HandleAuth', 'NewBatcher')",
+					},
+					"limit": map[string]any{
+						"type":        "integer",
+						"description": "Maximum number of commits to show (default: 10)",
+						"default":     10,
+					},
+					"since": map[string]any{
+						"type":        "string",
+						"description": "Only show commits after this date (e.g., '2024-01-01', '3 months ago')",
+					},
+					"path_pattern": map[string]any{
+						"type":        "string",
+						"description": "Optional: disambiguate when multiple functions have the same name",
+					},
+				},
+				"required": []string{"function_name"},
+			},
+		},
+		{
+			Name:        "cie_find_introduction",
+			Description: "Find the commit that first introduced a code pattern. Uses git pickaxe (-S) to find when a pattern was first added to the codebase. Useful for understanding the origin of code, debugging, and security audits.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"code_snippet": map[string]any{
+						"type":        "string",
+						"description": "The code pattern to find the introduction of (e.g., 'jwt.Generate()', 'access_token :=')",
+					},
+					"function_name": map[string]any{
+						"type":        "string",
+						"description": "Optional: limit search to the file containing this function",
+					},
+					"path_pattern": map[string]any{
+						"type":        "string",
+						"description": "Optional: limit search scope to specific paths",
+					},
+				},
+				"required": []string{"code_snippet"},
+			},
+		},
+		{
+			Name:        "cie_blame_function",
+			Description: "Get aggregated blame analysis for a function showing code ownership. Returns a breakdown of who wrote what percentage of the function, useful for identifying experts, reviewers, and understanding code ownership.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"function_name": map[string]any{
+						"type":        "string",
+						"description": "Name of the function to analyze (e.g., 'RegisterRoutes', 'Parse')",
+					},
+					"path_pattern": map[string]any{
+						"type":        "string",
+						"description": "Optional: disambiguate when multiple functions have the same name",
+					},
+					"show_lines": map[string]any{
+						"type":        "boolean",
+						"description": "Include line-by-line breakdown (default: false)",
+						"default":     false,
+					},
+				},
+				"required": []string{"function_name"},
+			},
+		},
 	}
 }
 
@@ -861,6 +956,9 @@ var toolHandlers = map[string]toolHandler{
 	"cie_list_endpoints":         handleListEndpoints,
 	"cie_find_implementations":   handleFindImplementations,
 	"cie_trace_path":             handleTracePath,
+	"cie_function_history":       handleFunctionHistory,
+	"cie_find_introduction":      handleFindIntroduction,
+	"cie_blame_function":         handleBlameFunction,
 }
 
 func (s *mcpServer) handleToolCall(ctx context.Context, params mcpToolCallParams) (*mcpToolResult, error) {
@@ -1130,6 +1228,50 @@ func handleTracePath(ctx context.Context, s *mcpServer, args map[string]any) (*t
 		PathPattern: pathPattern,
 		MaxPaths:    maxPaths,
 		MaxDepth:    maxDepth,
+	})
+}
+
+func handleFunctionHistory(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
+	if s.gitExecutor == nil {
+		return tools.NewError("Git history tools are not available. Git repository not detected."), nil
+	}
+	funcName, _ := args["function_name"].(string)
+	pathPattern, _ := args["path_pattern"].(string)
+	since, _ := args["since"].(string)
+	limit, _ := getIntArg(args, "limit", 10)
+	return tools.FunctionHistory(ctx, s.client, s.gitExecutor, tools.FunctionHistoryArgs{
+		FunctionName: funcName,
+		Limit:        limit,
+		Since:        since,
+		PathPattern:  pathPattern,
+	})
+}
+
+func handleFindIntroduction(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
+	if s.gitExecutor == nil {
+		return tools.NewError("Git history tools are not available. Git repository not detected."), nil
+	}
+	codeSnippet, _ := args["code_snippet"].(string)
+	funcName, _ := args["function_name"].(string)
+	pathPattern, _ := args["path_pattern"].(string)
+	return tools.FindIntroduction(ctx, s.client, s.gitExecutor, tools.FindIntroductionArgs{
+		CodeSnippet:  codeSnippet,
+		FunctionName: funcName,
+		PathPattern:  pathPattern,
+	})
+}
+
+func handleBlameFunction(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
+	if s.gitExecutor == nil {
+		return tools.NewError("Git history tools are not available. Git repository not detected."), nil
+	}
+	funcName, _ := args["function_name"].(string)
+	pathPattern, _ := args["path_pattern"].(string)
+	showLines, _ := args["show_lines"].(bool)
+	return tools.BlameFunction(ctx, s.client, s.gitExecutor, tools.BlameFunctionArgs{
+		FunctionName: funcName,
+		PathPattern:  pathPattern,
+		ShowLines:    showLines,
 	})
 }
 
