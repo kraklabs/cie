@@ -69,14 +69,14 @@ deps: ## Download dependencies (CozoDB)
 		fi \
 	fi
 
-test: ## Run all tests with race detection and coverage
+test: deps ## Run all tests with race detection and coverage
 	@echo "Running tests..."
-	go test -race -cover -coverprofile=coverage.out ./...
+	CGO_ENABLED=1 CGO_LDFLAGS="$(CGO_LDFLAGS)" go test -race -cover -coverprofile=coverage.out ./...
 	@echo "✓ Coverage report: coverage.out"
 
 test-short: ## Run tests without integration tests (no CozoDB required)
 	@echo "Running short tests..."
-	go test -short -race ./...
+	CGO_ENABLED=1 CGO_LDFLAGS="$(CGO_LDFLAGS)" go test -short -race ./...
 
 test-coverage: test ## View coverage in browser
 	go tool cover -html=coverage.out
