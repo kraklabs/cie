@@ -257,11 +257,12 @@ func TestFilterByMinSimilarity(t *testing.T) {
 		wantLen       int
 	}{
 		{
+			// similarity = 1.0 - distance/2.0 (cosine distance 0->2 maps to similarity 1.0->0)
 			name: "no filter with 0.0 threshold",
 			rows: [][]any{
-				{"func1", "file1.go", "sig1", 1, 0.2}, // 80% similarity
-				{"func2", "file2.go", "sig2", 2, 0.5}, // 50% similarity
-				{"func3", "file3.go", "sig3", 3, 0.8}, // 20% similarity
+				{"func1", "file1.go", "sig1", 1, 0.2}, // 90% similarity (1.0 - 0.2/2 = 0.90)
+				{"func2", "file2.go", "sig2", 2, 0.5}, // 75% similarity (1.0 - 0.5/2 = 0.75)
+				{"func3", "file3.go", "sig3", 3, 0.8}, // 60% similarity (1.0 - 0.8/2 = 0.60)
 			},
 			minSimilarity: 0.0,
 			wantLen:       3,
@@ -269,28 +270,28 @@ func TestFilterByMinSimilarity(t *testing.T) {
 		{
 			name: "filter >= 70% similarity",
 			rows: [][]any{
-				{"func1", "file1.go", "sig1", 1, 0.2}, // 80% similarity
-				{"func2", "file2.go", "sig2", 2, 0.5}, // 50% similarity
-				{"func3", "file3.go", "sig3", 3, 0.8}, // 20% similarity
+				{"func1", "file1.go", "sig1", 1, 0.2}, // 90% similarity
+				{"func2", "file2.go", "sig2", 2, 0.5}, // 75% similarity
+				{"func3", "file3.go", "sig3", 3, 0.8}, // 60% similarity
 			},
 			minSimilarity: 0.7,
-			wantLen:       1, // only func1
+			wantLen:       2, // func1 (90%) and func2 (75%) pass, func3 (60%) fails
 		},
 		{
 			name: "filter >= 50% similarity",
 			rows: [][]any{
-				{"func1", "file1.go", "sig1", 1, 0.2}, // 80% similarity
-				{"func2", "file2.go", "sig2", 2, 0.5}, // 50% similarity
-				{"func3", "file3.go", "sig3", 3, 0.8}, // 20% similarity
+				{"func1", "file1.go", "sig1", 1, 0.2}, // 90% similarity
+				{"func2", "file2.go", "sig2", 2, 0.5}, // 75% similarity
+				{"func3", "file3.go", "sig3", 3, 0.8}, // 60% similarity
 			},
 			minSimilarity: 0.5,
-			wantLen:       2, // func1 and func2
+			wantLen:       3, // all pass (60% >= 50%)
 		},
 		{
 			name: "all results below threshold",
 			rows: [][]any{
-				{"func1", "file1.go", "sig1", 1, 0.6}, // 40% similarity
-				{"func2", "file2.go", "sig2", 2, 0.8}, // 20% similarity
+				{"func1", "file1.go", "sig1", 1, 1.2}, // 40% similarity (1.0 - 1.2/2 = 0.40)
+				{"func2", "file2.go", "sig2", 2, 1.6}, // 20% similarity (1.0 - 1.6/2 = 0.20)
 			},
 			minSimilarity: 0.5,
 			wantLen:       0,
@@ -335,6 +336,7 @@ func TestFormatSemanticResults(t *testing.T) {
 		wantContains []string
 	}{
 		{
+			// Distance 0.1 → similarity = 1.0 - 0.1/2 = 0.95 = 95%
 			name: "basic formatting",
 			rows: [][]any{
 				{"HandleAuth", "internal/auth.go", "func HandleAuth()", 10, 0.1, "func HandleAuth() { /* code */ }"},
@@ -342,7 +344,7 @@ func TestFormatSemanticResults(t *testing.T) {
 			args: SemanticSearchArgs{Query: "authentication"},
 			wantContains: []string{
 				"🔍 **Semantic search** for 'authentication'",
-				"🟢 **HandleAuth** (90.0% match)",
+				"🟢 **HandleAuth** (95.0% match)",
 				"📁 internal/auth.go:10",
 			},
 		},
@@ -358,16 +360,18 @@ func TestFormatSemanticResults(t *testing.T) {
 			},
 		},
 		{
+			// similarity = 1.0 - distance/2.0
+			// Distance 0.1 → 95% (🟢 >= 75%), Distance 0.7 → 65% (🟡 50-75%), Distance 1.2 → 40% (🔴 < 50%)
 			name: "multiple results with different confidence",
 			rows: [][]any{
-				{"HighMatch", "file1.go", "func HighMatch()", 1, 0.1},    // 90% - high
-				{"MediumMatch", "file2.go", "func MediumMatch()", 2, 0.4}, // 60% - medium
-				{"LowMatch", "file3.go", "func LowMatch()", 3, 0.6},      // 40% - low
+				{"HighMatch", "file1.go", "func HighMatch()", 1, 0.1},     // 95% - green
+				{"MediumMatch", "file2.go", "func MediumMatch()", 2, 0.7}, // 65% - yellow
+				{"LowMatch", "file3.go", "func LowMatch()", 3, 1.2},       // 40% - red
 			},
 			args: SemanticSearchArgs{Query: "test"},
 			wantContains: []string{
-				"🟢 **HighMatch** (90.0% match)",
-				"🟡 **MediumMatch** (60.0% match)",
+				"🟢 **HighMatch** (95.0% match)",
+				"🟡 **MediumMatch** (65.0% match)",
 				"🔴 **LowMatch** (40.0% match)",
 			},
 		},
@@ -400,10 +404,11 @@ func TestFormatSemanticResultRow(t *testing.T) {
 		wantContains []string
 	}{
 		{
+			// Distance 0.15 → similarity = 1.0 - 0.15/2 = 0.925 = 92.5%
 			name: "basic row without code",
 			row:  []any{"MyFunc", "pkg/file.go", "func MyFunc()", 42, 0.15},
 			wantContains: []string{
-				"🟢 **MyFunc** (85.0% match)",
+				"🟢 **MyFunc** (92.5% match)",
 				"📁 pkg/file.go:42",
 				"📝 `func MyFunc()`",
 			},
@@ -417,13 +422,14 @@ func TestFormatSemanticResultRow(t *testing.T) {
 			},
 		},
 		{
+			// Distance 0.6 → similarity = 1.0 - 0.6/2 = 0.70 = 70% (🟡 because 50% <= 70% < 75%)
 			name: "row with long signature",
 			row: []any{
 				"LongFunc",
 				"pkg/file.go",
 				"func LongFunc(ctx context.Context, req *Request, opts ...Option) (*Response, error)",
 				10,
-				0.3,
+				0.6,
 			},
 			wantContains: []string{
 				"🟡 **LongFunc** (70.0% match)",
@@ -678,15 +684,16 @@ func TestSemanticSearch_WithMinSimilarity(t *testing.T) {
 	ctx := setupTest(t)
 
 	// Create mock client that returns HNSW results
+	// similarity = 1.0 - distance/2.0
 	client := NewMockClientCustom(
 		func(ctx context.Context, script string) (*QueryResult, error) {
 			// Return multiple results with varying distances
 			return NewMockQueryResult(
 				[]string{"name", "file_path", "signature", "start_line", "distance", "code_text"},
 				[][]any{
-					{"HighSimilarityFunc", "file1.go", "func High()", 1, 0.1, "code1"}, // 90% similarity
-					{"MedSimilarityFunc", "file2.go", "func Med()", 2, 0.4, "code2"},   // 60% similarity
-					{"LowSimilarityFunc", "file3.go", "func Low()", 3, 0.7, "code3"},   // 30% similarity
+					{"HighSimilarityFunc", "file1.go", "func High()", 1, 0.1, "code1"}, // 95% similarity (1.0 - 0.05)
+					{"MedSimilarityFunc", "file2.go", "func Med()", 2, 0.7, "code2"},   // 65% similarity (1.0 - 0.35)
+					{"LowSimilarityFunc", "file3.go", "func Low()", 3, 1.2, "code3"},   // 40% similarity (1.0 - 0.60)
 				},
 			), nil
 		},
@@ -701,23 +708,23 @@ func TestSemanticSearch_WithMinSimilarity(t *testing.T) {
 	defer server.Close()
 
 	args := SemanticSearchArgs{
-		Query:         "test",
-		MinSimilarity: 0.7, // 70% threshold
-		EmbeddingURL:  server.URL,
+		Query:          "test",
+		MinSimilarity:  0.7, // 70% threshold
+		EmbeddingURL:   server.URL,
 		EmbeddingModel: "nomic-embed-text",
-		Limit:         10,
+		Limit:          10,
 	}
 
 	result, err := SemanticSearch(ctx, client, args)
 
 	assertNoError(t, err)
-	// Should only include HighSimilarityFunc (90%)
+	// Should only include HighSimilarityFunc (95% >= 70%)
 	assertContains(t, result.Text, "HighSimilarityFunc")
 	if strings.Contains(result.Text, "MedSimilarityFunc") {
-		t.Error("Should not include MedSimilarityFunc (60% < 70% threshold)")
+		t.Error("Should not include MedSimilarityFunc (65% < 70% threshold)")
 	}
 	if strings.Contains(result.Text, "LowSimilarityFunc") {
-		t.Error("Should not include LowSimilarityFunc (30% < 70% threshold)")
+		t.Error("Should not include LowSimilarityFunc (40% < 70% threshold)")
 	}
 }
 
