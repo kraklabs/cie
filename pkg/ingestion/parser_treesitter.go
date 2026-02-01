@@ -158,7 +158,11 @@ func (p *TreeSitterParser) ParseFile(fileInfo FileInfo) (*ParseResult, error) {
 
 	switch fileInfo.Language {
 	case "go":
-		parser := p.goPool.Get().(*sitter.Parser)
+		parserObj := p.goPool.Get()
+		parser, ok := parserObj.(*sitter.Parser)
+		if !ok {
+			return nil, fmt.Errorf("invalid parser type from go pool")
+		}
 		defer p.goPool.Put(parser)
 		goResult, goErr := p.parseGoAST(parser, content, fileInfo.Path)
 		if goErr != nil {
@@ -171,15 +175,27 @@ func (p *TreeSitterParser) ParseFile(fileInfo FileInfo) (*ParseResult, error) {
 		unresolvedCalls = goResult.UnresolvedCalls
 		packageName = goResult.PackageName
 	case "python":
-		parser := p.pyPool.Get().(*sitter.Parser)
+		parserObj := p.pyPool.Get()
+		parser, ok := parserObj.(*sitter.Parser)
+		if !ok {
+			return nil, fmt.Errorf("invalid parser type from python pool")
+		}
 		defer p.pyPool.Put(parser)
 		functions, types, calls, err = p.parsePythonAST(parser, content, fileInfo.Path)
 	case "javascript":
-		parser := p.jsPool.Get().(*sitter.Parser)
+		parserObj := p.jsPool.Get()
+		parser, ok := parserObj.(*sitter.Parser)
+		if !ok {
+			return nil, fmt.Errorf("invalid parser type from javascript pool")
+		}
 		defer p.jsPool.Put(parser)
 		functions, types, calls, err = p.parseJavaScriptAST(parser, content, fileInfo.Path)
 	case "typescript":
-		parser := p.tsPool.Get().(*sitter.Parser)
+		parserObj := p.tsPool.Get()
+		parser, ok := parserObj.(*sitter.Parser)
+		if !ok {
+			return nil, fmt.Errorf("invalid parser type from typescript pool")
+		}
 		defer p.tsPool.Put(parser)
 		functions, types, calls, err = p.parseTypeScriptAST(parser, content, fileInfo.Path)
 	case "protobuf":
