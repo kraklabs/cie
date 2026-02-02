@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "cie": {
+      "command": "cie",
+      "args": ["--mcp"],
+      "env": {
+        "CIE_LOG_LEVEL": "warn"
+      },
+      "disabled": false
+    }
+  }
+}
