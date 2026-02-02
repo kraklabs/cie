@@ -57,11 +57,11 @@ func TestDirectorySummaryMain_Integration(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
-		name             string
-		path             string
-		maxFuncsPerFile  int
-		wantContain      []string
-		wantExclude      []string
+		name            string
+		path            string
+		maxFuncsPerFile int
+		wantContain     []string
+		wantExclude     []string
 	}{
 		{
 			name:            "summary of handler directory",

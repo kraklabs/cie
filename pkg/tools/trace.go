@@ -97,7 +97,7 @@ type traceSearchResult struct {
 	paths         [][]TraceFuncInfo
 	nodesExplored int
 	limitReached  bool
-	canceled     bool
+	canceled      bool
 }
 
 // pathNode represents a node in the BFS traversal.

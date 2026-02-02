@@ -53,7 +53,7 @@ type CIEConfig struct {
 
 // EmbeddingConfig contains embedding provider configuration.
 type EmbeddingConfig struct {
-	Provider   string `yaml:"provider"`             // ollama, nomic, openai, mock
+	Provider   string `yaml:"provider"` // ollama, nomic, openai, mock
 	BaseURL    string `yaml:"base_url"`
 	Model      string `yaml:"model"`
 	Dimensions int    `yaml:"dimensions,omitempty"` // embedding dimensions (768 for nomic, 1536 for openai)

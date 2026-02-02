@@ -37,14 +37,14 @@ type serveFlags struct {
 
 // indexJob represents an async indexing job.
 type indexJob struct {
-	ID        string    `json:"job_id"`
-	Status    string    `json:"status"` // "running", "completed", "failed"
-	Phase     string    `json:"phase,omitempty"`
-	Progress  *progress `json:"progress,omitempty"`
+	ID        string       `json:"job_id"`
+	Status    string       `json:"status"` // "running", "completed", "failed"
+	Phase     string       `json:"phase,omitempty"`
+	Progress  *progress    `json:"progress,omitempty"`
 	Result    *indexResult `json:"result,omitempty"`
-	Error     string    `json:"error,omitempty"`
-	StartedAt time.Time `json:"started_at"`
-	EndedAt   *time.Time `json:"ended_at,omitempty"`
+	Error     string       `json:"error,omitempty"`
+	StartedAt time.Time    `json:"started_at"`
+	EndedAt   *time.Time   `json:"ended_at,omitempty"`
 }
 
 type progress struct {
@@ -385,9 +385,8 @@ func (s *cieServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 		RepoPath  string `json:"repo_path"`
 		Full      bool   `json:"full"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		// Empty body is OK, use defaults
-	}
+	// Decode request body; empty body is OK, use defaults
+	_ = json.NewDecoder(r.Body).Decode(&req)
 	if req.ProjectID == "" {
 		req.ProjectID = s.projectID
 	}
@@ -447,11 +446,7 @@ func (s *cieServer) runIndexJob(job *indexJob, projectID, repoPath string, full 
 		Level: slog.LevelInfo,
 	}))
 
-	// Get embedding config from environment
-	embeddingProvider := getEnv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
-	if embeddingProvider == "nomic-embed-text" {
-		embeddingProvider = "ollama" // Map model name to provider
-	}
+	// Get embedding config from environment (model name used for setup below)
 
 	// Set environment for embedding
 	_ = os.Setenv("OLLAMA_BASE_URL", getEnv("OLLAMA_HOST", "http://localhost:11434"))
@@ -492,9 +487,9 @@ func (s *cieServer) runIndexJob(job *indexJob, projectID, repoPath string, full 
 			Value: repoPath,
 		},
 		IngestionConfig: ingestion.IngestionConfig{
-			ParserMode:          ingestion.ParserModeAuto,
-			EmbeddingProvider:   "ollama",
-			EmbeddingDimensions: 768, // nomic-embed-text default
+			ParserMode:           ingestion.ParserModeAuto,
+			EmbeddingProvider:    "ollama",
+			EmbeddingDimensions:  768, // nomic-embed-text default
 			BatchTargetMutations: 500,
 			MaxFileSizeBytes:     1048576,
 			CheckpointPath:       checkpointDir,

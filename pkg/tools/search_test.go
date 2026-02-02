@@ -583,4 +583,3 @@ func TestFindFunction_QueryError(t *testing.T) {
 	assertContains(t, result.Text, "Query error")
 	assertContains(t, result.Text, "Generated query")
 }
-

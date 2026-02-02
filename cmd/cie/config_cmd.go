@@ -1,6 +1,21 @@
-// Copyright 2026 KrakLabs
+// Copyright 2025 KrakLabs
 //
-// SPDX-License-Identifier: AGPL-3.0-only
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published
+// by the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// For commercial licensing, contact: licensing@kraklabs.com
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package main
 
@@ -19,14 +34,14 @@ import (
 // ConfigOutput represents the configuration for JSON output.
 // It mirrors the Config struct but uses JSON tags appropriate for external consumption.
 type ConfigOutput struct {
-	ConfigPath string              `json:"config_path"`
-	Version    string              `json:"version"`
-	ProjectID  string              `json:"project_id"`
-	CIE        CIEConfigOutput     `json:"cie"`
-	Embedding  EmbeddingOutput     `json:"embedding"`
-	Indexing   IndexingOutput      `json:"indexing"`
-	Roles      *RolesConfigOutput  `json:"roles,omitempty"`
-	LLM        *LLMConfigOutput    `json:"llm,omitempty"`
+	ConfigPath string             `json:"config_path"`
+	Version    string             `json:"version"`
+	ProjectID  string             `json:"project_id"`
+	CIE        CIEConfigOutput    `json:"cie"`
+	Embedding  EmbeddingOutput    `json:"embedding"`
+	Indexing   IndexingOutput     `json:"indexing"`
+	Roles      *RolesConfigOutput `json:"roles,omitempty"`
+	LLM        *LLMConfigOutput   `json:"llm,omitempty"`
 }
 
 // CIEConfigOutput represents CIE server configuration for JSON output.

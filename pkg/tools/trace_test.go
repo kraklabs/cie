@@ -231,13 +231,13 @@ func TestTracePath_Unit_SimplePath(t *testing.T) {
 // Test TracePath with disconnected graph (no path exists)
 func TestTracePath_Unit_DisconnectedGraph(t *testing.T) {
 	functions := map[string]TraceFuncInfo{
-		"main":      {Name: "main", FilePath: "cmd/main.go", Line: "1"},
-		"isolated":  {Name: "isolated", FilePath: "internal/isolated.go", Line: "10"},
-		"saveToDb":  {Name: "saveToDb", FilePath: "internal/db.go", Line: "20"},
+		"main":     {Name: "main", FilePath: "cmd/main.go", Line: "1"},
+		"isolated": {Name: "isolated", FilePath: "internal/isolated.go", Line: "10"},
+		"saveToDb": {Name: "saveToDb", FilePath: "internal/db.go", Line: "20"},
 	}
 	callGraph := map[string][]string{
-		"main":     {},  // main calls nothing
-		"isolated": {"saveToDb"},  // isolated calls saveToDb but unreachable from main
+		"main":     {},           // main calls nothing
+		"isolated": {"saveToDb"}, // isolated calls saveToDb but unreachable from main
 		"saveToDb": {},
 	}
 
@@ -294,11 +294,11 @@ func TestTracePath_Unit_CycleDetection(t *testing.T) {
 // Test TracePath with max depth limit
 func TestTracePath_Unit_MaxDepthLimit(t *testing.T) {
 	functions := map[string]TraceFuncInfo{
-		"main":  {Name: "main", FilePath: "cmd/main.go", Line: "1"},
-		"fn1":   {Name: "fn1", FilePath: "pkg/fn1.go", Line: "10"},
-		"fn2":   {Name: "fn2", FilePath: "pkg/fn2.go", Line: "20"},
-		"fn3":   {Name: "fn3", FilePath: "pkg/fn3.go", Line: "30"},
-		"deep":  {Name: "deep", FilePath: "pkg/deep.go", Line: "40"},
+		"main": {Name: "main", FilePath: "cmd/main.go", Line: "1"},
+		"fn1":  {Name: "fn1", FilePath: "pkg/fn1.go", Line: "10"},
+		"fn2":  {Name: "fn2", FilePath: "pkg/fn2.go", Line: "20"},
+		"fn3":  {Name: "fn3", FilePath: "pkg/fn3.go", Line: "30"},
+		"deep": {Name: "deep", FilePath: "pkg/deep.go", Line: "40"},
 	}
 	callGraph := map[string][]string{
 		"main": {"fn1"},

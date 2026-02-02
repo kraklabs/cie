@@ -46,7 +46,7 @@ func ensureDockerCompose() (string, error) {
 	composePath := filepath.Join(cieDir, "docker-compose.yml")
 
 	// Always write the embedded compose file to ensure it's up to date
-	if err := os.WriteFile(composePath, embeddedDockerCompose, 0640); err != nil {
+	if err := os.WriteFile(composePath, embeddedDockerCompose, 0600); err != nil {
 		return "", fmt.Errorf("failed to write docker-compose.yml: %w", err)
 	}
 
