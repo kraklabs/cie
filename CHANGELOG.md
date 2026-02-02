@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-02-01
+
+### Added
+- New git history MCP tools (v1.5.0):
+  - `cie_function_history`: Get git commit history for a specific function using line-based tracking.
+  - `cie_find_introduction`: Find the commit that first introduced a code pattern (git pickaxe).
+  - `cie_blame_function`: Get aggregated blame analysis showing code ownership percentages.
+- `GitExecutor` helper in `pkg/tools/git.go` for safe git command execution with timeout support.
+- Git repository auto-discovery from config file location.
+
+### Changed
+- MCP server version bumped to 1.5.0.
+
 ## [0.4.7] - 2026-01-23
 
 ### Fixed
