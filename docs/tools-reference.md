@@ -29,6 +29,9 @@ Complete reference for all CIE MCP tools. Each tool is documented with parameter
 | Explore directory structure | `cie_directory_summary` | `path="internal/cie"` |
 | Check index health | `cie_index_status` | `path_pattern="internal/cie"` |
 | Verify patterns absent (security) | `cie_verify_absence` | `patterns=["apiKey", "password"]` |
+| Function commit history | `cie_function_history` | `function_name="HandleAuth"` |
+| Find code introduction | `cie_find_introduction` | `code_snippet="jwt.Generate()"` |
+| Function blame/ownership | `cie_blame_function` | `function_name="Parse"` |
 
 ---
 
@@ -37,6 +40,7 @@ Complete reference for all CIE MCP tools. Each tool is documented with parameter
 - [Search Tools](#search-tools) - Find code by pattern or meaning
 - [Navigation Tools](#navigation-tools) - Move around codebase structure
 - [Analysis Tools](#analysis-tools) - Understand architecture and relationships
+- [Git History Tools](#git-history-tools) - Explore code evolution and ownership
 - [Administrative Tools](#administrative-tools) - Index management and schema
 
 ---
@@ -1192,6 +1196,189 @@ Found 23 endpoints:
 
 ---
 
+## Git History Tools
+
+### cie_function_history
+
+Get git commit history for a specific function. Tracks changes to the function over time using line-based git history (`git log -L`). Useful for understanding when and why a function was modified.
+
+**Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `function_name` | string | Yes | — | Name of the function to get history for (e.g., "HandleAuth", "NewBatcher") |
+| `limit` | int | No | 10 | Maximum number of commits to show |
+| `since` | string | No | — | Only show commits after this date (e.g., "2024-01-01", "3 months ago") |
+| `path_pattern` | string | No | — | Disambiguate when multiple functions have the same name |
+
+**Example:**
+
+```json
+{
+  "function_name": "HandleAuth",
+  "limit": 15,
+  "since": "2024-01-01"
+}
+```
+
+**Disambiguate multiple matches:**
+
+```json
+{
+  "function_name": "Parse",
+  "path_pattern": "internal/config"
+}
+```
+
+**Output:**
+
+```markdown
+## Commit History for `HandleAuth`
+**File:** `internal/http/auth.go:45-89`
+
+| Commit | Date | Author | Message |
+|--------|------|--------|---------|
+| `a1b2c3d` | 2024-03-15 | Alice | Add JWT refresh token support |
+| `e4f5g6h` | 2024-02-28 | Bob | Fix session timeout handling |
+| `i7j8k9l` | 2024-01-10 | Alice | Initial auth implementation |
+```
+
+**Tips:**
+
+-  **Track function evolution** - See who changed a function and why
+-  **Date filtering** - Use `since` to focus on recent changes
+- 🧩 **Line-based tracking** - Uses `git log -L` to track changes even if function moves within file
+- ⚠️ **Fallback to file history** - If line tracking fails (renamed file), falls back to file-level history with a warning
+
+**Common Mistakes:**
+
+- No Expecting to see changes from before function was created
+- No Not using `path_pattern` when function name is common (e.g., "New", "Parse")
+- Yes Use `cie_find_function` first to verify function exists and get exact location
+
+---
+
+### cie_find_introduction
+
+Find the commit that first introduced a code pattern. Uses git pickaxe (`git log -S`) to find when a pattern was first added to the codebase. Useful for understanding the origin of code, debugging, and security audits.
+
+**Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `code_snippet` | string | Yes | — | The code pattern to find the introduction of (e.g., "jwt.Generate()", "access_token :=") |
+| `function_name` | string | No | — | Limit search to the file containing this function |
+| `path_pattern` | string | No | — | Limit search scope to specific paths |
+
+**Example:**
+
+```json
+{
+  "code_snippet": "jwt.Generate()",
+  "function_name": "HandleAuth"
+}
+```
+
+**Scope to path:**
+
+```json
+{
+  "code_snippet": "replicationLog",
+  "path_pattern": "internal/cie"
+}
+```
+
+**Output:**
+
+```markdown
+## Introduction of Pattern
+**Pattern:** `jwt.Generate()`
+**Introduced in:** `a1b2c3d` on 2024-01-15
+**Author:** Alice Smith
+**Message:** Add JWT token generation for auth flow
+
+**Files changed:**
+```
+ internal/http/auth.go | 45 +++++++++++++++
+ pkg/jwt/generate.go   | 89 +++++++++++++++++++++++++++++
+ 2 files changed, 134 insertions(+)
+```
+```
+
+**Tips:**
+
+-  **Origin discovery** - Find when a feature or pattern was first added
+-  **Security audits** - Track when sensitive code was introduced and by whom
+- 🧩 **Narrow scope** - Use `function_name` or `path_pattern` for faster searches
+-  **Debug regressions** - Find when a bug-causing pattern was introduced
+
+**Common Mistakes:**
+
+- No Using overly complex patterns (simpler patterns are more reliable)
+- No Not scoping search on large repos (can be slow without `path_pattern`)
+- No Expecting to find patterns that were added in multiple small changes
+- Yes Start with simple, unique code patterns that were likely added in a single commit
+
+---
+
+### cie_blame_function
+
+Get aggregated blame analysis for a function showing code ownership. Returns a breakdown of who wrote what percentage of the function. Useful for identifying experts, reviewers, and understanding code ownership.
+
+**Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `function_name` | string | Yes | — | Name of the function to analyze (e.g., "RegisterRoutes", "Parse") |
+| `path_pattern` | string | No | — | Disambiguate when multiple functions have the same name |
+| `show_lines` | bool | No | false | Include line-by-line breakdown |
+
+**Example:**
+
+```json
+{
+  "function_name": "RegisterRoutes"
+}
+```
+
+**With disambiguation:**
+
+```json
+{
+  "function_name": "Parse",
+  "path_pattern": "internal/config",
+  "show_lines": true
+}
+```
+
+**Output:**
+
+```markdown
+## Blame Analysis for `RegisterRoutes`
+**File:** `internal/http/routes.go:23-89` (67 lines)
+
+| Author | Lines | % | Last Commit |
+|--------|------:|--:|-------------|
+| Alice Smith | 42 | 63% | `a1b2c3d` |
+| Bob Jones | 18 | 27% | `e4f5g6h` |
+| Carol White | 7 | 10% | `i7j8k9l` |
+```
+
+**Tips:**
+
+-  **Find experts** - Identify who knows the code best for questions or reviews
+-  **Code review** - Know who to request reviews from based on ownership
+- 📊 **Ownership metrics** - Understand code distribution across team
+- 🧩 **Disambiguate with path** - Use `path_pattern` for common function names
+
+**Common Mistakes:**
+
+- No Expecting blame to show original author (shows current line ownership)
+- No Not using `path_pattern` when function name exists in multiple files
+- Yes Use with `cie_function_history` to see both ownership AND change timeline
+
+---
+
 ## Administrative Tools
 
 ### cie_index_status
@@ -1748,6 +1935,6 @@ Set `full_code=true` parameter:
 
 ---
 
-**Last Updated:** 2026-01-13
+**Last Updated:** 2026-02-01
 **Schema Version:** v3
-**CIE Version:** 0.1.0+
+**CIE Version:** 0.5.0+

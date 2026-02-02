@@ -173,7 +173,8 @@ Initial open source release of CIE (Code Intelligence Engine).
 - No hardcoded credentials in codebase
 - All API keys via environment variables only
 
-[unreleased]: https://github.com/kraklabs/cie/compare/v0.4.7...HEAD
+[unreleased]: https://github.com/kraklabs/cie/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/kraklabs/cie/compare/v0.4.7...v0.5.0
 [0.4.7]: https://github.com/kraklabs/cie/compare/v0.4.6...v0.4.7
 [0.4.6]: https://github.com/kraklabs/cie/compare/v0.4.5...v0.4.6
 [0.4.5]: https://github.com/kraklabs/cie/compare/v0.4.4...v0.4.5
