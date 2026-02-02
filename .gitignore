@@ -34,3 +34,7 @@ Thumbs.db
 
 # CIE configuration
 .cie/
+
+# Claude Code
+.claude/
+.specs/
