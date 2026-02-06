@@ -59,7 +59,6 @@ All responses include file paths and line numbers for easy navigation.
 Before setting up MCP integration, ensure:
 
 - [ ] **CIE is installed** - Run `cie --version` to verify (see [Getting Started](./getting-started.md))
-- [ ] **Infrastructure is running** - Run `cie start` to start the Docker services
 - [ ] **Project is indexed** - Run `cie index` in your project directory
 - [ ] **AI assistant installed** - Claude Code or Cursor is installed on your system
 - [ ] **CIE in PATH** - Running `which cie` (Unix) or `where cie` (Windows) finds the binary
@@ -68,13 +67,8 @@ Before setting up MCP integration, ensure:
 
 ```bash
 cd /path/to/your/project
-cie start  # Ensure infrastructure is up
-cie index  # Ensure code is indexed
-cie status # Verify status is OK
-
-# Other useful commands:
-# cie stop              Stop infrastructure (preserves data)
-# cie reset --yes       Delete indexed data and reindex fresh
+cie index   # Ensure code is indexed
+cie status  # Verify status
 ```
 
 ---
@@ -108,18 +102,15 @@ Edit `~/.config/claude/settings.json`:
   "mcpServers": {
     "cie": {
       "command": "cie",
-      "args": ["--mcp"],
-      "env": {
-        "CIE_BASE_URL": "http://localhost:9090"
-      }
+      "args": ["--mcp"]
     }
   }
 }
 ```
 
-**Important Notes:**
-- Setting `CIE_BASE_URL` allows the CLI to connect to the Docker-based server automatically.
-- If you have multiple projects, you can use the `--config` flag to specify which one to use.
+> **Note:** CIE MCP server runs in embedded mode by default -- it reads directly from the local CozoDB database at `~/.cie/data/<project>/`. No HTTP server or Docker infrastructure is needed. For distributed setups, configure `edge_cache` in `.cie/project.yaml` to use a remote server.
+
+If you have multiple projects, you can use the `--config` flag to specify which one to use.
 
 **Example for a project at `/Users/alice/code/myapp`:**
 
@@ -232,10 +223,7 @@ Cursor supports MCP configuration through:
   "mcpServers": {
     "cie": {
       "command": "cie",
-      "args": ["--mcp"],
-      "env": {
-        "CIE_BASE_URL": "http://localhost:9090"
-      }
+      "args": ["--mcp"]
     }
   }
 }
@@ -275,18 +263,7 @@ cd /path/to/your/project
 cie --mcp
 ```
 
-**Expected output:**
-
-```
- CIE MCP Server
-Listening on stdio for MCP requests...
-Project: my-project (/Users/alice/code/myapp)
-Tools available: 23
-
-Ready for AI assistant connections.
-```
-
-Press Ctrl+C to stop.
+In embedded mode, the MCP server communicates via stdin/stdout silently -- there is no visible output. The server is ready when the process starts. Press Ctrl+C to stop.
 
 ### Step 2: Verify Tools are Available
 
@@ -520,7 +497,15 @@ func AuthMiddleware(next http.Handler) http.Handler {
    }
    ```
 
-2. **Wrong config file path**
+2. **Project not indexed**
+
+   **Solution:** Run `cie index` in your project directory. Verify the index exists:
+   ```bash
+   ls -la /path/to/project/.cie/project.yaml
+   cie status
+   ```
+
+3. **Wrong config file path**
 
    **Solution:** Verify `.cie/project.yaml` exists:
    ```bash
@@ -529,7 +514,7 @@ func AuthMiddleware(next http.Handler) http.Handler {
 
    If missing, run `cie index` in project directory.
 
-3. **Relative path used instead of absolute**
+4. **Relative path used instead of absolute**
 
    **Solution:** Change from `~/code/myapp` to `/Users/alice/code/myapp` (full path).
 
@@ -812,7 +797,6 @@ CIE respects these environment variables (can override `.cie/project.yaml`):
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `CIE_BASE_URL` | Edge Cache URL | `http://localhost:8080` |
 | `CIE_PROJECT_ID` | Project identifier | `my-project` |
 | `CIE_LLM_URL` | LLM API for `cie_analyze` | `http://localhost:11434` |
 | `CIE_LLM_MODEL` | LLM model name | `qwen2.5-coder:7b` |
@@ -832,4 +816,4 @@ Set these before starting the AI assistant if you want to override config file s
 
 ---
 
-**Last Updated:** 2026-01-13
+**Last Updated:** 2026-02-06

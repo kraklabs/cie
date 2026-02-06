@@ -188,19 +188,20 @@ cie:
 
 - **Type:** `string`
 - **Required:** No
-- **Default:** `"http://localhost:9090"` (detected automatically if Docker is running)
+- **Default:** `""` (empty string)
 - **Environment Override:** `CIE_BASE_URL`
-- **Description:** HTTP URL for read and write operations when delegating to a remote server. When using the Docker infrastructure, this should point to the CIE server.
+- **Description:** When empty (default), CIE uses embedded mode -- reading directly from the local CozoDB database. Set this to an HTTP URL to use a remote CIE server.
 
-**Format:** Full URL with protocol (`http://` or `https://`)
+**Format:** Full URL with protocol (`http://` or `https://`), or empty string for embedded mode.
 
 **Example:**
 ```yaml
 cie:
-  edge_cache: "http://localhost:9090"   # Local Docker server
+  edge_cache: ""                                      # Embedded mode (default)
+  # edge_cache: "https://cie-cache.example.com"       # Remote server
 ```
 
-**Architecture note:** In production deployments, Primary Hub handles writes while Edge Cache(s) handle reads. For local development, both typically run on localhost.
+**Architecture note:** In production/enterprise deployments, Primary Hub handles writes while Edge Cache(s) handle reads. For local development, embedded mode (empty `edge_cache`) is recommended -- no server required.
 
 ---
 
@@ -553,7 +554,7 @@ Environment variables override configuration file values. Use them for:
 - Per-environment configuration (dev, staging, prod)
 - Secret management (API keys)
 - CI/CD pipelines
-- Docker deployments
+- Remote/enterprise deployments
 
 ### CIE Configuration Variables
 
@@ -562,7 +563,7 @@ Environment variables override configuration file values. Use them for:
 | `CIE_CONFIG_PATH` | `string` | `.cie/project.yaml` | Explicit path to config file |
 | `CIE_PROJECT_ID` | `string` | from config | Override project ID |
 | `CIE_PRIMARY_HUB` | `string` | `localhost:50051` | Primary Hub gRPC address |
-| `CIE_BASE_URL` | `string` | `http://localhost:8080` | Edge Cache HTTP URL |
+| `CIE_BASE_URL` | `string` | `""` (empty) | Edge Cache HTTP URL (remote mode only) |
 | `CIE_LLM_URL` | `string` | — | Enable LLM, set base URL |
 | `CIE_LLM_MODEL` | `string` | — | LLM model name |
 | `CIE_LLM_API_KEY` | `string` | — | LLM API key |
@@ -959,9 +960,9 @@ roles:
 
 ---
 
-### Docker Configuration
+### Enterprise / Remote Server Configuration
 
-Configuration optimized for Docker deployment:
+Configuration for distributed deployments with a remote CIE server:
 
 ```yaml
 version: "1"
@@ -969,11 +970,11 @@ project_id: "${PROJECT_ID}"
 
 cie:
   primary_hub: "${CIE_PRIMARY_HUB:-cie-primary-hub:50051}"
-  edge_cache: "${CIE_EDGE_CACHE:-http://cie-edge-cache:8080}"
+  edge_cache: "${CIE_EDGE_CACHE:-https://cie-cache.example.com}"
 
 embedding:
   provider: "${EMBEDDING_PROVIDER:-ollama}"
-  base_url: "${OLLAMA_HOST:-http://ollama:11434}"
+  base_url: "${OLLAMA_HOST:-http://localhost:11434}"
   model: "${OLLAMA_EMBED_MODEL:-nomic-embed-text}"
   api_key: "${EMBEDDING_API_KEY}"
 
@@ -987,33 +988,7 @@ indexing:
     - "vendor/**"
 ```
 
-**Corresponding docker-compose.yml:**
-
-```yaml
-services:
-  cie:
-    image: kraklabs/cie:latest
-    environment:
-      PROJECT_ID: "my-project"
-      CIE_PRIMARY_HUB: "cie-primary-hub:50051"
-      CIE_EDGE_CACHE: "http://cie-edge-cache:8080"
-      EMBEDDING_PROVIDER: "ollama"
-      OLLAMA_HOST: "http://ollama:11434"
-    volumes:
-      - ./:/workspace
-      - cie-data:/root/.cie
-
-  ollama:
-    image: ollama/ollama:latest
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama-data:/root/.ollama
-
-volumes:
-  cie-data:
-  ollama-data:
-```
+> **Note:** This configuration is for enterprise/distributed setups where CIE Primary Hub and Edge Cache run as separate services. For most users, embedded mode (the default, with no `edge_cache` set) is sufficient and requires no server infrastructure.
 
 ---
 
@@ -1227,14 +1202,13 @@ indexing:
 
 ### Storage Settings
 
-CIE stores data in `.cie/db` (local mode) or connects to remote servers.
+CIE stores data in `~/.cie/data/<project_id>/` (embedded mode) or connects to remote servers.
 
 **Local storage:**
 ```
-your-project/
-└── .cie/
-    ├── project.yaml
-    └── db/              # CozoDB database files
+~/.cie/
+└── data/
+    └── <project_id>/        # CozoDB database files
         ├── cozo_data.db
         └── cozo_wal.db
 ```
@@ -1245,17 +1219,20 @@ your-project/
 
 **Cleanup:**
 ```bash
-# Remove index (keeps config)
-rm -rf .cie/db
+# Remove index for current project (keeps config)
+cie reset --yes
 
-# Full cleanup
-rm -rf .cie
+# Manual cleanup
+rm -rf ~/.cie/data/<project_id>
+
+# Full cleanup (all projects)
+rm -rf ~/.cie/data
 ```
 
 **Backup:**
 ```bash
-# Backup database
-tar -czf cie-backup.tar.gz .cie/db
+# Backup database for a project
+tar -czf cie-backup.tar.gz ~/.cie/data/<project_id>
 ```
 
 ---
@@ -1486,6 +1463,20 @@ When upgrading to future schema versions:
 
 ---
 
+### Migrating from Docker to Embedded Mode
+
+For a complete step-by-step migration guide, see **[Migration Guide: Docker to Embedded Mode](./migration-guide.md)**.
+
+Quick summary:
+
+1. Re-initialize: `cie init --force -y`
+2. Re-index locally: `cie index --full`
+3. Your MCP tools now work without Docker!
+
+**Auto-fallback**: If your `.cie/project.yaml` still has `edge_cache` set but the server is unreachable, CIE will automatically fall back to embedded mode if local data exists.
+
+---
+
 ## Related Documentation
 
 | Document | Description |
@@ -1503,12 +1494,11 @@ When upgrading to future schema versions:
 **Essential commands:**
 ```bash
 cie init                 # Create default config
-cie start                # Start Docker infrastructure
-cie stop                 # Stop infrastructure (preserves data)
+cie index                # Index codebase
+cie --mcp                # Start MCP server (embedded mode)
 cie reset --yes          # Delete indexed data
 cie config show          # View effective config
 cie config validate      # Check config validity
-cie config get <field>   # Get specific value
 ```
 
 **Config file location:**

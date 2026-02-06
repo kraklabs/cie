@@ -21,14 +21,15 @@ Run these commands first to gather system information:
 ```bash
 # System information
 cie --version          # Shows version, Go version, build info
-docker ps              # Verify Docker containers are running
-cie start              # Verify infrastructure health
 
 # Configuration health
 cie config show        # Display effective configuration
 cie status             # Verify connection to server and index status
 
-# Quick embedding test
+# Check local data exists
+ls ~/.cie/data/
+
+# Quick embedding test (if using Ollama)
 curl http://localhost:11434/api/tags
 ```
 
@@ -37,8 +38,8 @@ curl http://localhost:11434/api/tags
 - `go version` should be 1.24 or newer
 - `cie config show` should display valid YAML without errors
 - `cie status` should show function count > 0 if indexed
-- Ollama curl should return JSON list of models (if using Ollama)
-- `.cie/db/` directory should exist with files if project is indexed
+- `~/.cie/data/<project_id>/` directory should exist with files if project is indexed
+- Ollama curl should return JSON list of models (if using Ollama for embeddings)
 
 ---
 
@@ -62,10 +63,7 @@ CIE uses CozoDB as its graph engine, which requires a C library. If the binary w
    brew tap kraklabs/cie && brew install cie
    ```
 
-2. **Use the Docker-based approach:**
-   By using `cie start` and letting the processing happen inside Docker, you avoid all local library dependency issues.
-
-3. **Rebuild with Static Linking:**
+2. **Rebuild with Static Linking:**
    If you must build the CLI locally, use the provided `Makefile` which handles library downloading and static linking automatically:
    ```bash
    make build
@@ -446,6 +444,32 @@ cie index
 **Related:**
 - [Embedding Providers](./configuration.md#embedding-providers)
 - [Ollama Setup](./getting-started.md#ollama-setup)
+
+---
+
+### Issue: Indexing Without Ollama
+
+**Symptoms:**
+- Warning messages about embedding failures during `cie index`
+- Semantic search returns no results after indexing
+- `cie_index_status` shows functions but no embeddings
+
+**Cause:**
+Ollama is not running or the embedding model is not pulled. This is **not an error** -- CIE is designed to work without embeddings.
+
+**What works without embeddings:**
+All 20+ tools except `cie_semantic_search` and `cie_find_similar_functions`:
+- `cie_grep`, `cie_find_function`, `cie_find_callers`, `cie_find_callees`
+- `cie_trace_path`, `cie_get_call_graph`, `cie_list_endpoints`
+- `cie_get_function_code`, `cie_directory_summary`, and more
+
+**To enable semantic search:**
+```bash
+brew install ollama
+ollama pull nomic-embed-text
+ollama serve
+cie index --full  # Re-index to generate embeddings
+```
 
 ---
 
@@ -847,56 +871,53 @@ cie status
 - MCP tools timeout
 
 **Cause:**
-CIE Edge Cache server is not running. The Edge Cache serves queries in server mode.
+This error only applies when using **remote mode** (with `edge_cache` configured in `.cie/project.yaml`). If you are using **embedded mode** (the default, with no `edge_cache` set), connection errors should not occur -- CIE reads directly from the local database.
 
 **Solution:**
 
-**For local CLI use:**
+**If using embedded mode (default):**
 
-CIE CLI doesn't require Edge Cache server. It uses embedded database directly:
+Connection refused errors should not happen. If they do, verify your config does not have `edge_cache` set:
 
 ```bash
-# This works without server:
-cie status
-cie index
+cie config show | grep edge_cache
+# Should be empty or not present
 ```
 
-**For MCP server mode:**
+If `edge_cache` is set and you don't need a remote server, remove it from `.cie/project.yaml` or set it to an empty string.
 
-1. **Check if Edge Cache is running:**
+**If using remote mode (`edge_cache` configured):**
+
+1. **Check if the remote server is running:**
    ```bash
-   curl http://localhost:8080/health
+   curl http://your-server:8080/health
    ```
 
-2. **Start Edge Cache (if needed):**
+2. **Check config points to correct URL:**
    ```bash
-   # In separate terminal:
-   cie-edge-cache --port 8080
-
-   # Or as background process:
-   cie-edge-cache --port 8080 &
-   ```
-
-3. **Check config points to correct URL:**
-   ```bash
-   cie config show | grep base_url
+   cie config show | grep edge_cache
    ```
 
    Fix if wrong:
    ```yaml
    # .cie/project.yaml
-   edge_cache:
-     base_url: "http://localhost:8080"
+   cie:
+     edge_cache: "http://your-server:8080"
    ```
 
-**Note:** Most users don't need Edge Cache. Only required for:
-- MCP server mode in distributed setup
+**Note:** Most users don't need a remote Edge Cache. Embedded mode (the default) is sufficient for local development. Remote mode is only required for:
+- Enterprise/distributed deployments
 - Multiple projects sharing one index
 - Network-accessible query server
 
 **Verify:**
 ```bash
-curl http://localhost:8080/health
+# For embedded mode:
+cie status
+# Should show index status without connection errors
+
+# For remote mode:
+curl http://your-server:8080/health
 # Should return: {"status":"ok"}
 ```
 
@@ -1155,56 +1176,55 @@ cie query "?[name] := *cie_function{name} :limit 5"
 
 ## MCP Integration Issues
 
-### Issue: Indexed Locally but MCP Needs Docker Data
+### Issue: MCP Tools Return No Results After Indexing
 
 **Symptoms:**
 - Ran `cie index` and data was indexed locally (to `~/.cie/data/`)
-- Docker MCP server returns no results or "database not initialized"
+- MCP tools return no results or "database not initialized"
 - `cie status` shows functions indexed but MCP tools don't find them
 
 **Cause:**
-Local indexing stores data in `~/.cie/data/<project_id>/` on your machine, while Docker stores data in a separate Docker volume. The MCP server running in Docker cannot access your local data.
+The MCP server may not be finding the local database. In embedded mode (default), `cie --mcp` reads directly from `~/.cie/data/<project_id>/`.
 
 **Solution:**
 
-Use `cie serve` to run a local MCP-compatible server that uses your local data:
+1. **Verify the index exists:**
+   ```bash
+   cie status
+   # Should show function count > 0
+   ls ~/.cie/data/
+   # Should show your project_id directory
+   ```
 
-```bash
-# Stop Docker if running (optional, to avoid port conflict)
-cie stop
+2. **Ensure MCP config uses the correct working directory:**
 
-# Start local server on same port as Docker (9090)
-cie serve --port 9090
-```
+   **Claude Code** (`~/.claude/mcp.json` or project `.claude/mcp.json`):
+   ```json
+   {
+     "mcpServers": {
+       "cie": {
+         "command": "cie",
+         "args": ["--mcp"],
+         "cwd": "/absolute/path/to/your/project"
+       }
+     }
+   }
+   ```
 
-Now your MCP tools will work with the locally indexed data. The server exposes the same API as Docker, so no MCP configuration changes needed.
-
-**Alternative: Re-index via Docker**
-
-If you prefer using Docker:
-
-```bash
-# Start Docker infrastructure
-cie start
-
-# Re-index (will use Docker server automatically)
-cie index
-```
+3. **Re-index if needed:**
+   ```bash
+   cie index --full
+   ```
 
 **Verify:**
 ```bash
-# Check server is responding
-curl http://localhost:9090/health
-# Should return: {"status":"ok","project_id":"...","indexed":true}
-
-# Check function count
-curl http://localhost:9090/v1/status
-# Should show: {"functions": X, ...}
+cie status
+# Should show: Functions indexed: > 0
 ```
 
 **Related:**
-- [Local vs Docker Mode](#local-vs-docker-mode)
-- [`cie serve` Command Reference](./getting-started.md#cie-serve)
+- [MCP Integration Guide](./mcp-integration.md)
+- [Getting Started](./getting-started.md)
 
 ---
 
@@ -1942,17 +1962,12 @@ cie status
 cie config show
 cie config validate
 
-# Infrastructure management
-cie start                    # Start Docker containers
-cie stop                     # Stop containers (preserves data)
-cie reset --yes              # Delete indexed data
-cie reset --yes --docker     # Full reset including Docker volumes
-
 # Index management
-cie init
-cie index
-cie index --debug
-cie reset --yes && cie index  # Full reindex
+cie init                     # Create default config
+cie index                    # Index codebase
+cie index --debug            # Index with debug logging
+cie reset --yes              # Delete indexed data
+cie reset --yes && cie index # Full reindex
 
 # Querying
 cie query --semantic "query text"
@@ -1960,8 +1975,8 @@ cie query --function "FunctionName"
 cie query --text "literal text"
 
 # MCP server
-cie --mcp
-cie --mcp --debug
+cie --mcp                    # Start MCP server (embedded mode)
+cie --mcp --debug            # Start MCP server with debug logging
 ```
 
 ### Common Fixes
@@ -1970,14 +1985,12 @@ cie --mcp --debug
 |---------|-----------|
 | Library not found | Download libcozo_c from [CozoDB releases](https://github.com/cozodb/cozo/releases), copy to `/usr/local/lib/` |
 | No functions indexed | Check file extensions (`.go`, `.py`, `.js`, `.ts`, `.tsx`) |
-| Ollama connection failed | `cie start` or check Docker is running |
-| Index corrupted | `cie reset --yes --docker && cie start && cie index` |
+| Ollama connection failed | `brew install ollama && ollama serve` |
+| Index corrupted | `cie reset --yes && cie index` |
 | Slow queries | Add `path_pattern` filter to narrow scope |
 | Empty results | Lower `min_similarity` to 0.5 or try English query |
-| Port conflict | `cie stop` then `cie start` |
 | Config not found | `cd /path/to/project && cie init` |
-| Stop infrastructure | `cie stop` (preserves data) |
-| Full reset | `cie reset --yes --docker` (deletes everything) |
+| Full reset | `cie reset --yes && cie index` |
 
 ---
 

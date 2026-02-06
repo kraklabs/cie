@@ -31,8 +31,6 @@ CIE indexes your codebase and provides semantic search, call graph analysis, and
 
 ## Installation
 
-**Prerequisites:** Docker and Docker Compose
-
 | Method | Command |
 |--------|---------|
 | **Homebrew** | `brew tap kraklabs/cie && brew install cie` |
@@ -114,11 +112,8 @@ Download from [GitHub Releases](https://github.com/kraklabs/cie/releases/latest)
 
 ```bash
 cd /path/to/your/repo
-
-cie init      # Initialize project configuration
-cie start     # Start Docker infrastructure (Ollama + CIE Server)
-cie index     # Index the codebase
-cie status    # Check indexing status
+cie init -y    # Initialize project configuration
+cie index      # Index the codebase (works without Ollama too)
 ```
 
 **Example output:**
@@ -130,26 +125,21 @@ Types: 890
 Last indexed: 2 minutes ago
 ```
 
-### Common Issues
+> **Note:** CIE works without Ollama -- you'll have access to 20+ tools including grep, call graph, function finder, and more. Semantic search requires embeddings from Ollama or another provider.
 
-**"Connection refused"** - Ensure infrastructure is running: `cie start`
-**"CIE_BASE_URL not set"** - The CLI should detect it if `cie init` was run correctly, but you can export it manually: `export CIE_BASE_URL=http://localhost:9090`
-
-### Infrastructure Management
+### Management Commands
 
 | Command | Description |
 |---------|-------------|
-| `cie start` | Start Docker containers (Ollama + CIE Server) |
-| `cie stop` | Stop containers (preserves indexed data) |
-| `cie reset --yes` | Delete all indexed data |
-| `cie reset --yes --docker` | Full reset including Docker volumes |
+| `cie init -y` | Initialize project configuration |
+| `cie index` | Index (or re-index) the codebase |
+| `cie reset --yes` | Delete all indexed data for the project |
 
 ### MCP Server Mode
 
 CIE can run as an MCP server for integration with Claude Code:
 
 ```bash
-export CIE_BASE_URL=http://localhost:9090
 cie --mcp
 ```
 
@@ -160,10 +150,7 @@ Configure in your Claude Code settings:
   "mcpServers": {
     "cie": {
       "command": "cie",
-      "args": ["--mcp"],
-      "env": {
-        "CIE_BASE_URL": "http://localhost:9090"
-      }
+      "args": ["--mcp"]
     }
   }
 }
@@ -174,20 +161,19 @@ Configure in your Claude Code settings:
 CIE uses a YAML configuration file (`.cie/project.yaml`):
 
 ```yaml
+version: "1"
 project_id: my-project
-
-indexing:
-  parser_mode: treesitter
-  exclude:
-    - "node_modules/**"
-    - ".git/**"
-    - "vendor/**"
-
 embedding:
   provider: ollama
   base_url: http://localhost:11434
   model: nomic-embed-text
+```
 
+> **Embeddings are optional.** CIE works without Ollama or any embedding provider. You get full access to all structural tools (grep, call graph, function finder, etc.). Only semantic search (`cie_semantic_search`) requires embeddings.
+
+You can also configure an LLM for `cie_analyze` narrative generation:
+
+```yaml
 # Optional: LLM for cie_analyze narrative generation
 llm:
   enabled: true
@@ -258,7 +244,7 @@ When running as an MCP server, CIE provides 20+ tools organized by category:
 
 ## Data Storage
 
-CIE stores indexed data locally in `~/.cie/data/<project_id>/` using CozoDB with RocksDB backend. This ensures:
+CIE stores indexed data locally in `~/.cie/data/<project_id>/` using embedded CozoDB with RocksDB backend. This ensures:
 
 - Your code never leaves your machine
 - Fast local queries
@@ -283,6 +269,7 @@ CIE supports multiple embedding providers:
 | [Tools Reference](docs/tools-reference.md) | All 20+ MCP tools with examples |
 | [Architecture](docs/architecture.md) | How CIE works internally |
 | [MCP Integration](docs/mcp-integration.md) | Setting up with Claude Code, Cursor |
+| [Migration Guide](docs/migration-guide.md) | Migrating from Docker to embedded mode |
 | [Testing Guide](docs/testing.md) | Running tests and adding new tests |
 | [Benchmarks](docs/benchmarks.md) | Performance data and tuning |
 | [Exit Codes](docs/exit-codes.md) | CLI exit codes for scripting |
@@ -290,45 +277,38 @@ CIE supports multiple embedding providers:
 
 ## Architecture
 
-CIE uses a client-server architecture where the heavy lifting runs in Docker:
+CIE uses an embedded architecture -- a single binary handles indexing, querying, and MCP serving with no external services required:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  Docker Compose                                             │
-│  ┌─────────────┐     ┌────────────────────────────────┐    │
-│  │   Ollama    │◄────│         CIE Server             │    │
-│  │  :11434     │     │  - Indexing pipeline           │    │
-│  └─────────────┘     │  - CozoDB + RocksDB storage    │    │
-│                      │  - Query engine                 │    │
-│                      │  Port: 8080 (→ 9090 on host)   │    │
-│                      └──────────────▲─────────────────┘    │
-└─────────────────────────────────────│──────────────────────┘
-                                      │ HTTP
-┌─────────────────────────────────────│──────────────────────┐
-│  Host                               │                       │
-│  ┌──────────────────────────────────▼──────────────────┐   │
-│  │  CLI `cie` (lightweight client)                     │   │
-│  │  - cie init   → POST /v1/init                       │   │
-│  │  - cie index  → POST /v1/index (async)              │   │
-│  │  - cie status → GET  /v1/status                     │   │
-│  │  - cie --mcp  → uses /v1/query                      │   │
-│  │                                                      │   │
-│  │  Config: CIE_BASE_URL=http://localhost:9090         │   │
-│  └──────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  Host Machine                                                 │
+│  ┌──────────────────────────────────────────────────────┐    │
+│  │  CLI `cie`                                            │    │
+│  │  - cie init   → Creates .cie/project.yaml            │    │
+│  │  - cie index  → Parses code, writes to local CozoDB  │    │
+│  │  - cie --mcp  → Reads from local CozoDB              │    │
+│  │                                                       │    │
+│  │  Data: ~/.cie/data/<project>/  (RocksDB)             │    │
+│  └──────────────────────────────────────────────────────┘    │
+│                                                               │
+│  ┌──────────────┐  (optional)                                │
+│  │   Ollama     │  For semantic search embeddings            │
+│  │  :11434      │  Install: brew install ollama              │
+│  └──────────────┘  Model: nomic-embed-text                   │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 **Key Components:**
 
-- **CIE Server (Docker)**: Handles indexing, storage, and queries
-- **CLI Client (Host)**: Lightweight binary that delegates to server via HTTP
-- **Ollama (Docker)**: Local LLM for embedding generation
-- **CozoDB + RocksDB**: Datalog-based storage with persistent volumes
+- **CIE CLI**: Single binary handles indexing, querying, and MCP serving
+- **CozoDB + RocksDB**: Embedded database stored locally at `~/.cie/data/<project>/`
+- **Ollama (optional)**: Local embedding generation for semantic search
+- **Tree-sitter**: Code parsing for Go, Python, JS, TS
 
 **Code Structure:**
 ```
 cie/
-├── cmd/cie/           # CLI tool with init, index, query commands
+├── cmd/cie/           # CLI tool with init, index, query, MCP commands
 ├── pkg/
 │   ├── ingestion/     # Tree-sitter parsers and indexing pipeline
 │   ├── tools/         # 20+ MCP tool implementations
@@ -344,31 +324,16 @@ For in-depth architecture details, see [Architecture Guide](docs/architecture.md
 
 ### Testing
 
-CIE uses a two-tier testing approach:
-
-**Unit Tests (default)** - Fast in-memory tests, no CozoDB installation required:
 ```bash
-# Run all unit tests
+# Run all tests
 go test ./...
 
 # Run with short flag
 go test -short ./...
-```
 
-**Integration Tests** - Use Docker containers with CozoDB:
-```bash
-# Build test container (first time only)
-make docker-build-cie-test
-
-# Run integration tests
+# Run integration tests with CozoDB
 go test -tags=cozodb ./...
 ```
-
-The testcontainer infrastructure automatically handles:
-- Building Docker images if missing
-- Mounting project directories
-- Cleaning up containers
-- Graceful fallback if Docker unavailable
 
 For detailed testing documentation, see [docs/testing.md](docs/testing.md).
 

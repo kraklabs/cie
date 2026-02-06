@@ -4,7 +4,6 @@ This guide will help you install CIE, index your first codebase, and start using
 
 **What you'll learn:**
 - How to install the CIE CLI
-- How to start the infrastructure with `cie start`
 - How to index your first codebase
 - How to verify everything is working
 
@@ -14,9 +13,9 @@ This guide will help you install CIE, index your first codebase, and start using
 
 Before installing CIE, ensure you have these requirements:
 
-- **Docker and Docker Compose**: Required for running the background services (Ollama and CIE Server).
-- **Go 1.24+**: Only if you plan to build the CLI from source (recommended for development).
-- **Git**: For cloning the repository and indexing code.
+- **Git**: For cloning repositories and indexing code.
+- **Go 1.24+**: Only if you plan to build the CLI from source.
+- Optional: **Ollama** for semantic search embeddings (see [Optional: Enable Semantic Search](#optional-enable-semantic-search)).
 
 ---
 
@@ -76,36 +75,22 @@ cie init -y
 **What happens:**
 - Creates a `.cie/` directory.
 - Generates a `.cie/project.yaml` file with sensible defaults.
-- Automatically detects if you have the CIE infrastructure running.
 
-### Step 2: Start the Infrastructure
+### Step 2: Index Your Code
 
-CIE relies on Ollama for embeddings and a server for processing. Use the `start` command to automate the Docker setup:
-
-```bash
-cie start
-```
-
-**What happens:**
-- Verifies Docker is running.
-- Starts the `cie-server` and `ollama` containers.
-- Downloads the required embedding model (`nomic-embed-text`) if missing.
-- Performs a health check to ensure everything is ready.
-
-### Step 3: Index Your Code
-
-Now that the infrastructure is up, you can index your repository:
+Index your repository:
 
 ```bash
 cie index
 ```
 
 **What happens:**
-- The CLI communicates with the Docker container to index your code.
-- Files are parsed using Tree-sitter.
-- Semantic embeddings are generated and stored.
+- CIE parses your code locally using Tree-sitter and stores the index in `~/.cie/data/<project>/`.
+- Functions, types, and call graphs are extracted and stored.
 
-### Step 4: Verify the Index
+> **Note:** Ollama is optional. Without it, CIE indexes all metadata (functions, types, calls) but skips embeddings. 20+ tools work without embeddings; semantic search requires them.
+
+### Step 3: Verify the Index
 
 Check the index status and try a basic query:
 
@@ -131,48 +116,62 @@ Last indexed: 1 minute ago
 | Command | Description |
 |---------|-------------|
 | `cie init` | Initialize CIE in a project |
-| `cie start` | Start Docker infrastructure (Ollama + CIE Server) |
-| `cie stop` | Stop Docker infrastructure (preserves data) |
-| `cie reset --yes` | Delete all indexed data for the project |
-| `cie reset --yes --docker` | Reset data and Docker volumes (full reset) |
 | `cie index` | Index or reindex the codebase |
 | `cie status` | Show index statistics |
 | `cie query <script>` | Execute a CozoScript query |
 | `cie --mcp` | Start as an MCP server for AI assistants |
-| `cie serve` | Start a local HTTP server (alternative to Docker) |
+| `cie serve` | Start a local HTTP server |
+| `cie reset --yes` | Delete all indexed data for the project |
 
 ---
 
-## Local Server Mode (Alternative to Docker)
+## Optional: Enable Semantic Search
 
-If you prefer not to use Docker, or if you've indexed locally and want to use MCP tools, you can run CIE as a local HTTP server:
+CIE works without any embedding provider -- grep, call graph, function finder, and 20+ tools work immediately after indexing. To enable semantic search:
+
+1. Install Ollama:
+   ```bash
+   brew install ollama
+   ```
+
+2. Pull the embedding model:
+   ```bash
+   ollama pull nomic-embed-text
+   ```
+
+3. Start Ollama:
+   ```bash
+   ollama serve
+   ```
+
+4. Re-index to generate embeddings:
+   ```bash
+   cie index --full
+   ```
+
+No configuration changes needed -- the defaults already point to local Ollama.
+
+---
+
+## Server and Remote Modes
+
+### Local HTTP Server
+
+If you want to expose CIE as an HTTP API (for example, for custom integrations), you can run it as a local server:
 
 ```bash
-# Start local server on port 9090 (same as Docker)
 cie serve --port 9090
 ```
 
 This starts a local HTTP server that:
 - Uses your local indexed data from `~/.cie/data/<project_id>/`
-- Exposes the same API as the Docker container
-- Works with MCP tools without any configuration changes
+- Exposes a REST API for querying the index
 
-**When to use `cie serve`:**
-- You indexed locally and want to use MCP tools
-- You don't want to run Docker
-- You're developing or debugging CIE itself
+However, `cie --mcp` now works directly in embedded mode -- no server needed. For most users, the MCP integration is the recommended way to connect CIE to AI assistants.
 
-**Usage:**
-```bash
-# Start server (foreground)
-cie serve --port 9090
+### Remote Mode (Enterprise)
 
-# In another terminal, verify it's working
-curl http://localhost:9090/health
-curl http://localhost:9090/v1/status
-```
-
-**Note:** You can run either Docker (`cie start`) OR local server (`cie serve`), but not both on the same port simultaneously.
+For enterprise and distributed setups, CIE supports an `edge_cache` mode where the CLI connects to a remote CIE server. See the [Configuration Guide](./configuration.md) for details.
 
 ---
 
