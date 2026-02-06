@@ -1,14 +1,14 @@
 # CIE Architecture
 
-> **Version:** 1.0
-> **Last Updated:** 2026-01-13
+> **Version:** 1.1
+> **Last Updated:** 2026-02-06
 > **Status:** Stable
 
 ---
 
 ## Overview
 
-CIE (Code Intelligence Engine) is a local-first code indexing system that provides semantic search, call graph analysis, and architectural understanding through the Model Context Protocol (MCP). Unlike cloud-based code search tools, CIE keeps all data on your machine and integrates directly with AI assistants like Claude Code and Cursor.
+CIE (Code Intelligence Engine) is an embedded-first code indexing system that provides semantic search, call graph analysis, and architectural understanding through the Model Context Protocol (MCP). CIE runs entirely on your machine with no external services required -- the MCP server opens a local CozoDB database directly and serves queries over stdin/stdout. For enterprise and distributed setups, an optional remote mode connects to an HTTP Edge Cache server.
 
 **The Problem:**
 Traditional code search relies on text matching (grep, ripgrep) which misses semantic relationships. AI assistants need to understand not just what code says, but how components interact, what functions call each other, and where features are implemented.
@@ -17,8 +17,8 @@ Traditional code search relies on text matching (grep, ripgrep) which misses sem
 - **Parse** source code into abstract syntax trees (ASTs) using Tree-sitter
 - **Extract** functions, types, and call relationships
 - **Generate** semantic embeddings for meaning-based search
-- **Store** in a graph database (CozoDB) with Datalog queries
-- **Serve** through MCP protocol for AI assistant integration
+- **Store** in a graph database (CozoDB with RocksDB backend) with Datalog queries
+- **Serve** through MCP protocol for AI assistant integration (embedded by default)
 
 **Key Technologies:**
 - **Tree-sitter** - Error-tolerant parsing for Go, Python, JavaScript, TypeScript
@@ -484,9 +484,11 @@ db := NewDB("mem", "")
 // SQLite (small projects, <10k functions)
 db := NewDB("sqlite", ".cie/index.db")
 
-// RocksDB (large projects, production)
+// RocksDB (large projects, production — default for MCP server embedded mode)
 db := NewDB("rocksdb", ".cie/index_rocksdb")
 ```
+
+> **Note:** The MCP server uses RocksDB by default when running in embedded mode. Data is stored at `~/.cie/data/<project>/`. The `mem` backend is used only in tests, and `sqlite` is available for lightweight use cases but is not the default.
 
 **Read-Only vs Write:**
 
@@ -765,27 +767,35 @@ sequenceDiagram
 
 **Implementation:** `pkg/tools/`
 
-**CIE Client:**
+**Querier Interface (Dual-Mode):**
+
+All tools query through the `Querier` interface, which abstracts over both embedded and remote modes:
+
 ```go
 // pkg/tools/client.go
 
-type CIEClient struct {
-    BaseURL    string  // CIE Edge Cache API URL
-    HTTPClient *http.Client
-    Timeout    time.Duration  // 90 seconds for large queries
+// Querier is the interface for both embedded and remote modes.
+// All 20+ tools call Querier methods rather than a specific backend.
+type Querier interface {
+    Query(ctx context.Context, script string) (*QueryResult, error)
+    QueryRaw(ctx context.Context, script string) (map[string]any, error)
 }
 
-// Execute CozoScript query
-func (c *CIEClient) Query(script string) (*QueryResult, error) {
-    resp, err := c.HTTPClient.Post(
-        c.BaseURL + "/api/v1/query",
-        "application/json",
-        bytes.NewBuffer([]byte(script)),
-    )
-    // Parse JSON response
-    return parseResult(resp)
+// EmbeddedQuerier — reads directly from local CozoDB (default)
+// pkg/tools/client_embedded.go
+type EmbeddedQuerier struct {
+    backend *storage.EmbeddedBackend
+}
+
+// CIEClient — HTTP client for remote Edge Cache servers
+// pkg/tools/client.go
+type CIEClient struct {
+    BaseURL    string       // CIE Edge Cache API URL
+    HTTPClient *http.Client // 90-second timeout for large queries
 }
 ```
+
+In embedded mode (the default), the MCP server opens a local CozoDB database at `~/.cie/data/<project>/` and wraps it in an `EmbeddedQuerier`. In remote mode, a `CIEClient` sends HTTP requests to an Edge Cache server. The tool layer is unaware of which mode is active -- it only calls `Querier` methods.
 
 ### Tool Categories
 
@@ -1229,15 +1239,18 @@ The MCP (Model Context Protocol) server exposes CIE tools to AI assistants via J
          ┌────────────────────────┐
          │   CIE MCP Server       │
          │  (cmd/cie/mcp.go)      │
+         │                        │
+         │  Mode: embedded (default)
+         │  or remote (edge_cache) │
          └────────────┬───────────┘
                       │
          ┌────────────┴────────────┐
          │                         │
     ┌────▼─────┐            ┌──────▼──────┐
     │  20+     │            │   CozoDB    │
-    │  Tools   │───────────►│   Storage   │
-    │  Layer   │   Query    │             │
-    └──────────┘            └─────────────┘
+    │  Tools   │───────────►│  (embedded) │
+    │  Layer   │  Querier   │  ~/.cie/data│
+    └──────────┘  interface └─────────────┘
 ```
 
 ### JSON-RPC 2.0 Protocol
@@ -1278,7 +1291,18 @@ The MCP (Model Context Protocol) server exposes CIE tools to AI assistants via J
 
 ### Server Lifecycle
 
-**Implementation:** `cmd/cie/mcp.go:38-46`
+**Implementation:** `cmd/cie/mcp.go`
+
+**Dual-Mode Operation:**
+
+The MCP server supports two modes, selected automatically based on project configuration:
+
+- **Embedded (default)**: Opens local CozoDB (RocksDB backend) at `~/.cie/data/<project>/` directly. No external server needed. This is the recommended mode for individual developers.
+- **Remote**: Connects to an HTTP Edge Cache server for enterprise/distributed setups.
+
+Mode is determined by the `edge_cache` field in `.cie/project.yaml`:
+- Empty or absent → **embedded mode**
+- URL present → **remote mode** (with auto-fallback to embedded if the server is unreachable and local data exists)
 
 1. **Initialization:**
    ```
@@ -1286,6 +1310,7 @@ The MCP (Model Context Protocol) server exposes CIE tools to AI assistants via J
    ← Server responds with capabilities
 
    Client → initialized (notification) →
+   Server: Opens CozoDB (embedded) or connects to Edge Cache (remote)
    Server: Ready to receive requests
    ```
 
@@ -1373,23 +1398,29 @@ toolHandlers := map[string]func(args map[string]interface{}) (string, error){
 
 CIE provides actionable error messages:
 
-**Example: Connection Error**
+**Example: No Index Found (Embedded Mode)**
 ```
-Error: Failed to connect to CIE server at http://localhost:8080
+Error: No CIE index found for project "myproject"
 
 Possible causes:
-1. CIE server is not running
-   → Start with: cie mcp
+1. Project has not been indexed yet
+   → Run: cie index
 
-2. Wrong CIE_BASE_URL configured
-   → Check: echo $CIE_BASE_URL
-   → Should be: http://localhost:8080
-
-3. Firewall blocking connection
-   → Check: curl http://localhost:8080/health
+2. Wrong project directory
+   → Check: cie config show
+   → Index location: ~/.cie/data/<project>/
 ```
 
-**Example: Timeout**
+**Example: Remote Edge Cache Unreachable**
+```
+Warning: Edge Cache at http://192.168.1.10:30080 is not reachable.
+Falling back to embedded mode.
+
+Tip: Remove 'edge_cache' from .cie/project.yaml or run 'cie init --force -y'
+to use embedded mode by default.
+```
+
+**Example: Query Timeout**
 ```
 Error: Query timeout after 90 seconds
 
@@ -1399,9 +1430,6 @@ This usually means:
 
 2. Database is large (>100k functions)
    → Use more specific path_pattern to narrow scope
-
-3. First query after server start (index loading)
-   → Wait and retry, subsequent queries will be fast
 ```
 
 **Example: Regex Error**
@@ -1440,9 +1468,9 @@ Or use exclude_pattern for simpler filtering.
    - Vectors and metadata in one transactional store
    - HNSW index provides <10ms kNN queries even at 100k vectors
 
-3. **Embedded = Local-First:**
-   - No server to manage, data stays on machine
-   - SQLite-style deployment (single binary + data file)
+3. **Embedded = Zero-Setup:**
+   - No server to manage, no Docker required, data stays on machine
+   - Single binary opens CozoDB directly (RocksDB backend at `~/.cie/data/`)
    - RocksDB backend handles 1M+ functions
 
 4. **Transactional Consistency:**
@@ -1553,17 +1581,18 @@ Or use exclude_pattern for simpler filtering.
 - **More Tables:** Schema is more complex (9 tables vs 3)
   - Mitigation: Schema is stable, rarely changes
 
-### Why Local-First?
+### Why Embedded-First?
 
-**Decision:** Index data stays on user's machine instead of sending to cloud.
+**Decision:** The MCP server opens a local CozoDB database directly (embedded mode) by default, with no external server or Docker container required. A remote mode is available for enterprise distributed setups.
 
 **Rationale:**
 
-1. **Privacy:** Code never leaves machine (critical for enterprise/sensitive code)
-2. **No Latency:** Queries are milliseconds, not round-trip to API
-3. **Offline:** Works without internet (airplanes, secure networks)
-4. **Cost:** No per-query or per-user pricing
-5. **Control:** User owns their data, no vendor lock-in
+1. **Zero Setup:** `cie index` + `cie mcp` -- no Docker, no server processes, no ports to manage
+2. **Privacy:** Code never leaves machine (critical for enterprise/sensitive code)
+3. **No Latency:** Queries are sub-millisecond reads from local RocksDB
+4. **Offline:** Works without internet (airplanes, secure networks)
+5. **Cost:** No per-query or per-user pricing
+6. **Control:** User owns their data at `~/.cie/data/`, no vendor lock-in
 
 **Alternatives Considered:**
 
@@ -1571,6 +1600,7 @@ Or use exclude_pattern for simpler filtering.
 |-------------|---------|
 | **Cloud indexing** | Privacy concerns, latency, cost at scale |
 | **Hybrid (local cache + cloud)** | Complexity, sync conflicts |
+| **Local HTTP server (Docker)** | Extra setup friction, port conflicts, resource overhead |
 
 **Trade-offs:**
 
@@ -1579,7 +1609,7 @@ Or use exclude_pattern for simpler filtering.
 - **Compute:** Indexing uses CPU/memory on user's machine
   - Mitigation: Incremental indexing, background processing
 - **No Sharing:** Each user must index their own copy
-  - Mitigation: Enterprise CIE has shared Edge Cache (not open source)
+  - Mitigation: Enterprise CIE has shared Edge Cache with remote mode
 
 ### Why Deterministic IDs?
 
@@ -1735,7 +1765,7 @@ saveCheckpoint(checkpoint)
 
 | Alternative | Why Not |
 |-------------|---------|
-| **REST API** | Requires HTTP server, port conflicts, network permissions |
+| **REST API** | Requires HTTP server, port conflicts, network permissions -- contradicts embedded-first goal |
 | **gRPC** | Heavy (protobuf), overkill for stdio transport |
 | **Custom protocol** | Reinventing wheel, no ecosystem support |
 
@@ -2114,6 +2144,6 @@ Found an error in this documentation? Have suggestions for improvement?
 
 ---
 
-*Last Updated: 2026-01-13*
-*CIE Version: 1.0.0*
+*Last Updated: 2026-02-06*
+*CIE Version: 1.5.0*
 *Schema Version: v3*

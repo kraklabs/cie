@@ -18,7 +18,6 @@ import (
 func runReset(args []string, configPath string, globals GlobalFlags) {
 	fs := flag.NewFlagSet("reset", flag.ExitOnError)
 	confirm := fs.Bool("yes", false, "Confirm the reset (required)")
-	docker := fs.Bool("docker", false, "Also reset Docker containers and volumes")
 
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `Usage: cie reset [options]
@@ -32,8 +31,6 @@ Description:
   - Embeddings and call graphs
   - Indexing checkpoints
 
-  With --docker, also stops containers and removes Docker volumes.
-
   Use this if the database is corrupted or you want to start fresh.
   You'll need to re-run 'cie index' after resetting.
 
@@ -42,11 +39,8 @@ Options:
 		fs.PrintDefaults()
 		fmt.Fprintf(os.Stderr, `
 Examples:
-  # Reset local data only
+  # Reset local data
   cie reset --yes
-
-  # Reset everything including Docker volumes
-  cie reset --yes --docker
 
 Notes:
   This only affects local data. Configuration (.cie/project.yaml) is not deleted.
@@ -67,7 +61,7 @@ Notes:
 		), false)
 	}
 
-	composeDir, err := getCIEDir()
+	cieDir, err := getCIEDir()
 	if err != nil {
 		errors.FatalError(errors.NewInternalError(
 			"Failed to find CIE directory",
@@ -77,30 +71,11 @@ Notes:
 		), globals.JSON)
 	}
 
-	// Reset Docker if requested
-	if *docker {
-		composePath := filepath.Join(composeDir, "docker-compose.yml")
-		if _, err := os.Stat(composePath); err == nil {
-			ui.Header("Resetting Docker Infrastructure")
-
-			if err := checkDocker(); err != nil {
-				errors.FatalError(err, globals.JSON)
-			}
-
-			ui.Info("Stopping containers and removing volumes...")
-			if err := runComposeCommand(composeDir, "down", "-v"); err != nil {
-				ui.Warningf("Failed to reset Docker infrastructure: %v", err)
-			} else {
-				ui.Success("Docker infrastructure reset")
-			}
-		}
-	}
-
 	// Load configuration to get project ID
 	cfg, err := LoadConfig(configPath)
 	if err != nil {
 		// If no config, just clean up the data directory
-		dataDir := filepath.Join(composeDir, "data")
+		dataDir := filepath.Join(cieDir, "data")
 		if err := os.RemoveAll(dataDir); err != nil {
 			ui.Warningf("Failed to remove data directory: %v", err)
 		}
@@ -109,7 +84,7 @@ Notes:
 	}
 
 	// Determine data directory
-	dataDir := filepath.Join(composeDir, "data", cfg.ProjectID)
+	dataDir := filepath.Join(cieDir, "data", cfg.ProjectID)
 
 	// Check if data directory exists
 	if _, err := os.Stat(dataDir); os.IsNotExist(err) {

@@ -238,13 +238,16 @@ func (db *DatalogBuilder) BuildMutationsWithTypes(
 		buf.WriteString("]] :put cie_function_code { function_id, code_text } }\n")
 
 		// 3. Embedding (cie_function_embedding) - used by HNSW
-		embeddingStr := formatFloatArray(fn.Embedding)
-		buf.WriteString("{ ?[function_id, embedding] <- [[")
-		buf.WriteString(strings.Join([]string{
-			quoteString(fn.ID),
-			embeddingStr,
-		}, ", "))
-		buf.WriteString("]] :put cie_function_embedding { function_id, embedding } }\n")
+		// Skip if embedding is empty (e.g., embedding provider unavailable)
+		if len(fn.Embedding) > 0 {
+			embeddingStr := formatFloatArray(fn.Embedding)
+			buf.WriteString("{ ?[function_id, embedding] <- [[")
+			buf.WriteString(strings.Join([]string{
+				quoteString(fn.ID),
+				embeddingStr,
+			}, ", "))
+			buf.WriteString("]] :put cie_function_embedding { function_id, embedding } }\n")
+		}
 	}
 
 	// Type entities (v3: split into 3 tables for performance)
@@ -272,13 +275,16 @@ func (db *DatalogBuilder) BuildMutationsWithTypes(
 		buf.WriteString("]] :put cie_type_code { type_id, code_text } }\n")
 
 		// 3. Embedding (cie_type_embedding) - used by HNSW
-		embeddingStr := formatFloatArray(t.Embedding)
-		buf.WriteString("{ ?[type_id, embedding] <- [[")
-		buf.WriteString(strings.Join([]string{
-			quoteString(t.ID),
-			embeddingStr,
-		}, ", "))
-		buf.WriteString("]] :put cie_type_embedding { type_id, embedding } }\n")
+		// Skip if embedding is empty (e.g., embedding provider unavailable)
+		if len(t.Embedding) > 0 {
+			embeddingStr := formatFloatArray(t.Embedding)
+			buf.WriteString("{ ?[type_id, embedding] <- [[")
+			buf.WriteString(strings.Join([]string{
+				quoteString(t.ID),
+				embeddingStr,
+			}, ", "))
+			buf.WriteString("]] :put cie_type_embedding { type_id, embedding } }\n")
+		}
 	}
 
 	// Defines edges (store as entity with stable id to avoid composite-key quirks)

@@ -41,7 +41,6 @@ type ConfigOutput struct {
 	Embedding  EmbeddingOutput    `json:"embedding"`
 	Indexing   IndexingOutput     `json:"indexing"`
 	Roles      *RolesConfigOutput `json:"roles,omitempty"`
-	LLM        *LLMConfigOutput   `json:"llm,omitempty"`
 }
 
 // CIEConfigOutput represents CIE server configuration for JSON output.
@@ -77,15 +76,6 @@ type RolePatternOutput struct {
 	NamePattern string `json:"name_pattern,omitempty"`
 	CodePattern string `json:"code_pattern,omitempty"`
 	Description string `json:"description,omitempty"`
-}
-
-// LLMConfigOutput represents LLM configuration for JSON output.
-type LLMConfigOutput struct {
-	Enabled   bool   `json:"enabled"`
-	BaseURL   string `json:"base_url,omitempty"`
-	Model     string `json:"model,omitempty"`
-	MaxTokens int    `json:"max_tokens,omitempty"`
-	// APIKey is intentionally omitted from JSON output for security
 }
 
 // runConfig executes the 'config' CLI command, displaying current configuration.
@@ -139,7 +129,6 @@ Output Fields:
   - embedding:      Embedding provider settings (provider, base_url, model)
   - indexing:       Indexing settings (parser_mode, batch_target, exclude)
   - roles:          Custom role patterns (if defined)
-  - llm:            LLM settings for narrative generation (if enabled)
 
 `)
 	}
@@ -272,16 +261,6 @@ func buildConfigOutput(configPath string, cfg *Config) *ConfigOutput {
 		result.Roles = rolesOutput
 	}
 
-	// Add LLM config if enabled
-	if cfg.LLM.Enabled || cfg.LLM.BaseURL != "" {
-		result.LLM = &LLMConfigOutput{
-			Enabled:   cfg.LLM.Enabled,
-			BaseURL:   cfg.LLM.BaseURL,
-			Model:     cfg.LLM.Model,
-			MaxTokens: cfg.LLM.MaxTokens,
-		}
-	}
-
 	return result
 }
 
@@ -347,19 +326,4 @@ func printConfigHuman(cfg *ConfigOutput) {
 		}
 	}
 
-	// LLM (if enabled)
-	if cfg.LLM != nil {
-		fmt.Println()
-		ui.SubHeader("LLM (Narrative Generation):")
-		fmt.Printf("  Enabled:      %v\n", cfg.LLM.Enabled)
-		if cfg.LLM.BaseURL != "" {
-			fmt.Printf("  Base URL:     %s\n", cfg.LLM.BaseURL)
-		}
-		if cfg.LLM.Model != "" {
-			fmt.Printf("  Model:        %s\n", cfg.LLM.Model)
-		}
-		if cfg.LLM.MaxTokens > 0 {
-			fmt.Printf("  Max Tokens:   %d\n", cfg.LLM.MaxTokens)
-		}
-	}
 }

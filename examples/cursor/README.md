@@ -78,7 +78,7 @@ Command-line arguments for CIE:
 Environment variables for CIE:
 
 - `CIE_LOG_LEVEL` - Logging verbosity (options: `debug`, `info`, `warn`, `error`)
-- `CIE_BASE_URL` - Edge Cache URL for distributed setup (advanced, see docs)
+- `CIE_BASE_URL` - Edge Cache URL for remote/enterprise setup (optional, see docs)
 
 ### disabled
 

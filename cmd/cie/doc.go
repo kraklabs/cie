@@ -76,7 +76,7 @@
 //	cie_find_function        Find functions by name
 //	cie_find_callers         Find what calls a function
 //	cie_find_callees         Find what a function calls
-//	cie_analyze              Answer architectural questions with LLM
+//	cie_analyze              Answer architectural questions
 //	cie_list_endpoints       List HTTP/REST endpoints
 //	cie_trace_path           Trace call paths from entry points
 //	cie_find_type            Find types, interfaces, structs
@@ -116,12 +116,6 @@
 //
 //	OLLAMA_HOST            Ollama API URL (default: http://localhost:11434)
 //	OLLAMA_EMBED_MODEL     Embedding model (default: nomic-embed-text)
-//
-// LLM settings for narrative generation (optional):
-//
-//	CIE_LLM_URL            LLM API URL (OpenAI-compatible)
-//	CIE_LLM_MODEL          LLM model name
-//	CIE_LLM_API_KEY        LLM API key
 //
 // # Data Storage
 //

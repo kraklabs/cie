@@ -125,8 +125,6 @@ Commands:
   init          Create .cie/project.yaml configuration
   index         Index the current repository
   status        Show project status
-  start         Start the CIE infrastructure (Docker)
-  stop          Stop the CIE infrastructure (Docker)
   config        Show current configuration
   query         Execute CozoScript query
   serve         Start local HTTP server for MCP tools
@@ -156,10 +154,9 @@ Examples:
 
 Getting Started:
   1. Initialize configuration:  cie init
-  2. Start infrastructure:      cie start
-  3. Index your repository:     cie index
-  4. Check indexing status:     cie status
-  5. Run MCP server:            CIE_BASE_URL=http://localhost:9090 cie --mcp
+  2. Index your repository:     cie index
+  3. Check indexing status:     cie status
+  4. Run MCP server:            cie --mcp
 
 Data Storage:
   Data is stored locally in ~/.cie/data/<project_id>/
@@ -227,10 +224,6 @@ For detailed command help: cie <command> --help
 	switch command {
 	case "init":
 		runInit(cmdArgs, globals)
-	case "start":
-		runStart(cmdArgs, *configPath, globals)
-	case "stop":
-		runStop(cmdArgs, globals)
 	case "index":
 		runIndex(cmdArgs, *configPath, globals)
 	case "status":

@@ -50,9 +50,6 @@ import (
 //   - --edge-cache: Edge Cache URL (overrides --ip)
 //   - --primary-hub: Primary Hub gRPC address (overrides --ip)
 //   - --embedding-provider: Embedding provider (ollama, nomic, mock)
-//   - --llm-url: LLM API URL for narrative generation
-//   - --llm-model: LLM model name
-//   - --llm-api-key: LLM API key (optional for local models)
 //   - --no-hook: Skip git hook installation
 //   - --hook: Install git hook without prompting
 //
@@ -68,19 +65,11 @@ type initFlags struct {
 	force, nonInteractive, noHook, withHook bool
 	projectID, serverIP, edgeCache          string
 	primaryHub, embeddingProvider           string
-	llmURL, llmModel, llmAPIKey             string
 }
 
 func runInit(args []string, globals GlobalFlags) {
 	// Check if we should delegate to remote server
 	baseURL := os.Getenv("CIE_BASE_URL")
-	if baseURL == "" {
-		// Try to detect local server from docker-compose
-		defaultURL := "http://localhost:9090"
-		if isCIEServerAlive(defaultURL) {
-			baseURL = defaultURL
-		}
-	}
 
 	if baseURL != "" {
 		runRemoteInit(baseURL, args)
@@ -131,9 +120,6 @@ func parseInitFlags(args []string) initFlags {
 	fs.StringVar(&f.edgeCache, "edge-cache", "", "Edge Cache URL (overrides --ip)")
 	fs.StringVar(&f.primaryHub, "primary-hub", "", "Primary Hub gRPC address (overrides --ip)")
 	fs.StringVar(&f.embeddingProvider, "embedding-provider", "", "Embedding provider (ollama, nomic, mock)")
-	fs.StringVar(&f.llmURL, "llm-url", "", "LLM API URL (OpenAI-compatible, e.g., http://localhost:8001/v1)")
-	fs.StringVar(&f.llmModel, "llm-model", "", "LLM model name")
-	fs.StringVar(&f.llmAPIKey, "llm-api-key", "", "LLM API key (optional for local models)")
 	fs.BoolVar(&f.noHook, "no-hook", false, "Skip git hook installation (hook is installed by default)")
 	fs.BoolVar(&f.withHook, "hook", false, "Install git hook without prompting (for scripts)")
 
@@ -149,7 +135,6 @@ Description:
   The configuration defines:
   - Project identifier and data storage location
   - Embedding provider (ollama, nomic, openai, mock)
-  - Optional LLM settings for narrative generation
   - Indexing behavior (exclusions, batch size, etc.)
 
 Options:
@@ -206,26 +191,12 @@ func createInitConfig(cwd string, f initFlags) *Config {
 	cfg := DefaultConfig(pid)
 	if f.edgeCache != "" {
 		cfg.CIE.EdgeCache = f.edgeCache
-	} else {
-		// Default to localhost:9090 (Docker mode) since that's the recommended workflow.
-		// Users who don't want Docker can edit the config or use --edge-cache flag.
-		cfg.CIE.EdgeCache = "http://localhost:9090"
 	}
 	if f.primaryHub != "" {
 		cfg.CIE.PrimaryHub = f.primaryHub
 	}
 	if f.embeddingProvider != "" {
 		cfg.Embedding.Provider = f.embeddingProvider
-	}
-	if f.llmURL != "" {
-		cfg.LLM.Enabled = true
-		cfg.LLM.BaseURL = f.llmURL
-	}
-	if f.llmModel != "" {
-		cfg.LLM.Model = f.llmModel
-	}
-	if f.llmAPIKey != "" {
-		cfg.LLM.APIKey = f.llmAPIKey
 	}
 	return cfg
 }
@@ -244,32 +215,7 @@ func runInteractiveConfig(reader *bufio.Reader, cfg *Config) {
 		cfg.Embedding.Model = prompt(reader, "Embedding model", cfg.Embedding.Model)
 	}
 
-	promptLLMConfig(reader, cfg)
 	fmt.Println()
-}
-
-func promptLLMConfig(reader *bufio.Reader, cfg *Config) {
-	fmt.Println()
-	ui.SubHeader("LLM Configuration (for analyze narratives)")
-	fmt.Println("Configure an OpenAI-compatible LLM to generate narrative explanations.")
-	_, _ = ui.Dim.Println("Leave empty to skip LLM configuration.")
-	fmt.Println()
-
-	llmURLInput := prompt(reader, "LLM API URL (e.g., http://localhost:8001/v1)", cfg.LLM.BaseURL)
-	if llmURLInput != "" {
-		cfg.LLM.Enabled = true
-		cfg.LLM.BaseURL = llmURLInput
-		cfg.LLM.Model = prompt(reader, "LLM model name", "qwen3-coder")
-		cfg.LLM.APIKey = prompt(reader, "LLM API key (optional)", cfg.LLM.APIKey)
-		maxTokensStr := prompt(reader, "Max tokens for narrative", "2000")
-		if maxTokensStr != "" {
-			var maxTokens int
-			_, _ = fmt.Sscanf(maxTokensStr, "%d", &maxTokens)
-			if maxTokens > 0 {
-				cfg.LLM.MaxTokens = maxTokens
-			}
-		}
-	}
 }
 
 func saveInitConfig(cwd, configPath string, cfg *Config) {
@@ -487,25 +433,10 @@ func runRemoteInit(baseURL string, args []string) {
 	}
 
 	ui.Successf("Project initialized on server: %s", result.ProjectID)
-	if baseURL == "http://localhost:9090" {
-		ui.Infof("Detected CIE server running in Docker, automatically configured.")
-	} else {
-		ui.Infof("Using CIE server at %s", baseURL)
-	}
+	ui.Infof("Using CIE server at %s", baseURL)
 	fmt.Printf("Config saved at: %s\n", result.ConfigPath)
 	fmt.Println()
 	ui.SubHeader("Next steps:")
 	fmt.Printf("  1. Run '%s' to index the repository\n", ui.Cyan.Sprint("cie index"))
 	fmt.Printf("  2. Run '%s' to verify indexing\n", ui.Cyan.Sprint("cie status"))
-}
-
-// isCIEServerAlive checks if a CIE server is responding at the given URL.
-func isCIEServerAlive(url string) bool {
-	client := &http.Client{Timeout: 500 * time.Millisecond}
-	resp, err := client.Get(url + "/health")
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-	return resp.StatusCode == http.StatusOK
 }

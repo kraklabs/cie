@@ -128,7 +128,7 @@ func ExampleTracePath() {
 }
 
 // ExampleAnalyze demonstrates how to ask architectural questions about the codebase
-// using LLM-powered analysis. The tool combines semantic search with narrative generation.
+// using semantic search.
 func ExampleAnalyze() {
 	args := tools.AnalyzeArgs{
 		Question:    "What are the main entry points?",

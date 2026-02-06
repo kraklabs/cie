@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Embedded CozoDB mode for MCP server** — `cie --mcp` now reads directly from the local CozoDB database at `~/.cie/data/<project>/` without requiring an HTTP server or Docker infrastructure.
+- New `EmbeddedQuerier` type in `pkg/tools/client_embedded.go` implementing the `Querier` interface for direct local database access.
+- Auto-fallback in MCP server: when `edge_cache` is configured but unreachable and local data exists, automatically switches to embedded mode with a warning.
+- `isReachable()` and `hasLocalData()` helper functions in MCP server for intelligent mode detection.
+
+### Changed
+- **Docker is no longer required** — CIE now works fully standalone with just the `cie` binary.
+- Default `edge_cache` configuration is now empty (`""`) — embedded mode is the default.
+- `mcpServer.client` field changed from `*tools.CIEClient` to `tools.Querier` interface for dual-mode support.
+- `IndexStatus` tool function now accepts `Querier` interface instead of `*CIEClient`.
+- `cie init -y` now generates config without `edge_cache` set (embedded by default).
+- Quick Start simplified from `init → start → index` to `init → index`.
+
+### Removed
+- `cie start` and `cie stop` commands (Docker lifecycle management).
+- Embedded `docker-compose.yml` from the binary.
+- Docker auto-detection probe in `cie index` (`isCIEServerAlive` at localhost:9090).
+
+### Fixed
+- Indexing now succeeds without Ollama running — metadata (functions, types, calls) is written, empty embeddings are gracefully skipped.
+- MCP server no longer hangs when configured `edge_cache` is unreachable.
+
 ## [0.5.0] - 2026-02-01
 
 ### Added

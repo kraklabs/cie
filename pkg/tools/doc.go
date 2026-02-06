@@ -67,7 +67,7 @@
 //   - FindSimilarFunctions: Find functions with similar names
 //
 // Analysis Tools:
-//   - Analyze: Answer architectural questions with LLM narrative
+//   - Analyze: Answer architectural questions using semantic search
 //   - TracePath: Trace call paths from entry points to target function
 //   - GetCallGraph: Get complete call graph for a function
 //   - DirectorySummary: Summarize files in a directory with key functions
@@ -113,8 +113,6 @@
 //		BaseURL:        "http://localhost:3420",     // Required: CIE Edge Cache URL
 //		ProjectID:      "myproject",                 // Required: Project identifier
 //		HTTPClient:     &http.Client{Timeout: 30 * time.Second}, // Optional: custom HTTP client
-//		LLMClient:      llmProvider,                 // Optional: for Analyze() tool
-//		LLMMaxTokens:   2000,                        // Optional: max tokens for LLM (default: 2000)
 //		EmbeddingURL:   "http://localhost:11434",    // Optional: Ollama URL for embeddings
 //		EmbeddingModel: "nomic-embed-text",          // Optional: embedding model name
 //	}

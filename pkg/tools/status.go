@@ -27,7 +27,7 @@ import (
 // indexStatusState holds state for index status queries.
 type indexStatusState struct {
 	ctx    context.Context
-	client *CIEClient
+	client Querier
 	errors []string
 }
 
@@ -56,11 +56,13 @@ func (s *indexStatusState) countEntities(name, countQuery, listQuery string) int
 	return 0
 }
 
-// IndexStatus shows the indexing status for the project or a specific path
-func IndexStatus(ctx context.Context, client *CIEClient, pathPattern string) (*ToolResult, error) {
+// IndexStatus shows the indexing status for the project or a specific path.
+// projectID and mode are used for display purposes in the output header.
+func IndexStatus(ctx context.Context, client Querier, pathPattern, projectID, mode string) (*ToolResult, error) {
 	state := &indexStatusState{ctx: ctx, client: client}
 
-	output := fmt.Sprintf("# CIE Index Status\n\n**Project:** `%s`\n**Edge Cache:** `%s`\n\n", client.ProjectID, client.BaseURL)
+	header := fmt.Sprintf("# CIE Index Status\n\n**Project:** `%s`\n**Mode:** %s\n\n", projectID, mode)
+	output := header
 
 	// Get total counts
 	counts := state.getOverallCounts()
@@ -196,7 +198,7 @@ func (s *indexStatusState) formatErrors() string {
 	for _, e := range s.errors {
 		output += fmt.Sprintf("- %s\n", e)
 	}
-	output += "\n_Some queries failed. The Edge Cache may be unavailable or the project may not be fully indexed._\n"
-	output += fmt.Sprintf("\n### Troubleshooting:\n1. Check Edge Cache is running: `curl %s/health`\n2. Re-run indexing: `cie index --force-full-reindex`\n", s.client.BaseURL)
+	output += "\n_Some queries failed. The database may be unavailable or the project may not be fully indexed._\n"
+	output += "\n### Troubleshooting:\n1. Verify the project is indexed: `cie index`\n2. Re-run indexing: `cie index --force-full-reindex`\n"
 	return output
 }
