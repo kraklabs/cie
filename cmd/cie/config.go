@@ -42,7 +42,6 @@ type Config struct {
 	Embedding EmbeddingConfig `yaml:"embedding"`
 	Indexing  IndexingConfig  `yaml:"indexing"`
 	Roles     RolesConfig     `yaml:"roles,omitempty"` // Custom role patterns
-	LLM       LLMConfig       `yaml:"llm,omitempty"`   // LLM for narrative generation
 }
 
 // CIEConfig contains CIE server configuration.
@@ -85,15 +84,6 @@ type RolePattern struct {
 	CodePattern string `yaml:"code_pattern,omitempty"`
 	// Description explains what this role represents
 	Description string `yaml:"description,omitempty"`
-}
-
-// LLMConfig holds LLM provider settings for narrative generation in analyze.
-type LLMConfig struct {
-	Enabled   bool   `yaml:"enabled"`              // Enable LLM narrative generation
-	BaseURL   string `yaml:"base_url"`             // OpenAI-compatible API URL
-	Model     string `yaml:"model"`                // Model name
-	APIKey    string `yaml:"api_key,omitempty"`    // API key (optional for local models)
-	MaxTokens int    `yaml:"max_tokens,omitempty"` // Max tokens for response (default: 2000)
 }
 
 // DefaultConfig returns a config with sensible defaults for local development.
@@ -341,9 +331,6 @@ func findConfigFile() (string, error) {
 //   - CIE_BASE_URL: Override Edge Cache HTTP URL
 //   - OLLAMA_HOST: Override Ollama base URL
 //   - OLLAMA_EMBED_MODEL: Override embedding model
-//   - CIE_LLM_URL: Enable LLM and set API URL
-//   - CIE_LLM_MODEL: Set LLM model name
-//   - CIE_LLM_API_KEY: Set LLM API key
 func (c *Config) applyEnvOverrides() {
 	if url := os.Getenv("CIE_BASE_URL"); url != "" {
 		c.CIE.EdgeCache = url
@@ -360,17 +347,19 @@ func (c *Config) applyEnvOverrides() {
 	if model := os.Getenv("OLLAMA_EMBED_MODEL"); model != "" {
 		c.Embedding.Model = model
 	}
-	// LLM overrides
-	if url := os.Getenv("CIE_LLM_URL"); url != "" {
-		c.LLM.BaseURL = url
-		c.LLM.Enabled = true
+}
+
+// getCIEDir returns the path to ~/.cie directory, creating it if needed.
+func getCIEDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
 	}
-	if model := os.Getenv("CIE_LLM_MODEL"); model != "" {
-		c.LLM.Model = model
+	cieDir := filepath.Join(home, ".cie")
+	if err := os.MkdirAll(cieDir, 0750); err != nil {
+		return "", err
 	}
-	if key := os.Getenv("CIE_LLM_API_KEY"); key != "" {
-		c.LLM.APIKey = key
-	}
+	return cieDir, nil
 }
 
 // getEnv retrieves an environment variable or returns a fallback value if not set.
