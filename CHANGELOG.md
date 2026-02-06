@@ -5,7 +5,7 @@ All notable changes to CIE (Code Intelligence Engine) will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.0] - 2026-02-06
 
 ### Added
 - **Embedded CozoDB mode for MCP server** — `cie --mcp` now reads directly from the local CozoDB database at `~/.cie/data/<project>/` without requiring an HTTP server or Docker infrastructure.
