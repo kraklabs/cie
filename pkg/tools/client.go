@@ -29,7 +29,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/kraklabs/cie/pkg/llm"
 )
 
 // Querier is the interface for executing CIE queries.
@@ -44,8 +43,6 @@ type CIEClient struct {
 	BaseURL        string
 	ProjectID      string
 	HTTPClient     *http.Client
-	LLMClient      llm.Provider // Optional LLM for narrative generation
-	LLMMaxTokens   int          // Max tokens for LLM responses (default: 2000)
 	EmbeddingURL   string       // Ollama URL for embeddings (e.g., http://localhost:11434)
 	EmbeddingModel string       // Embedding model name (e.g., nomic-embed-text)
 }
@@ -129,15 +126,6 @@ func (c *CIEClient) QueryRaw(ctx context.Context, script string) (map[string]any
 	}
 
 	return result, nil
-}
-
-// SetLLMProvider configures an LLM provider for narrative generation.
-func (c *CIEClient) SetLLMProvider(provider llm.Provider, maxTokens int) {
-	c.LLMClient = provider
-	c.LLMMaxTokens = maxTokens
-	if c.LLMMaxTokens <= 0 {
-		c.LLMMaxTokens = 2000 // Default
-	}
 }
 
 // SetEmbeddingConfig configures embedding provider for semantic search.

@@ -563,8 +563,6 @@ func TestAnalyzeState_BuildOutput(t *testing.T) {
 		assertContains(t, result.Text, "Section 1")
 		assertContains(t, result.Text, "Section 2")
 
-		// Should note LLM not configured
-		assertContains(t, result.Text, "LLM not configured")
 	})
 
 	t.Run("with errors", func(t *testing.T) {
@@ -731,9 +729,6 @@ func TestGetFunctionCodeByName_Success(t *testing.T) {
 	assertContains(t, code, "func TestFunc()")
 	assertContains(t, code, "return 42")
 }
-
-// Note: generateNarrativeWithCode cannot be easily tested without a real LLM client
-// as it causes nil pointer panics. The function is tested indirectly through buildOutput.
 
 // TestPerformKeywordFallback tests keyword fallback logic.
 func TestPerformKeywordFallback(t *testing.T) {

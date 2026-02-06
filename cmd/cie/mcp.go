@@ -24,10 +24,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
+	"os/signal"
+	"path/filepath"
+	"syscall"
+	"time"
 
 	"github.com/kraklabs/cie/internal/errors"
-	"github.com/kraklabs/cie/pkg/llm"
+	"github.com/kraklabs/cie/pkg/storage"
 	"github.com/kraklabs/cie/pkg/tools"
 )
 
@@ -126,7 +131,9 @@ type mcpContent struct {
 // semantic search, custom role patterns from the project configuration,
 // and git executor for git history tools.
 type mcpServer struct {
-	client         *tools.CIEClient
+	client         tools.Querier
+	projectID      string                 // Project ID for error messages
+	mode           string                 // "embedded" or "remote" for logging
 	embeddingURL   string
 	embeddingModel string
 	customRoles    map[string]RolePattern // Custom role patterns from config
@@ -184,62 +191,97 @@ func runMCPServer(configPath string) {
 
 		// Fall back to environment variables
 		cfg = DefaultConfig("")
-		cfg.applyEnvOverrides() // Apply LLM and other env overrides
-		fmt.Fprintf(os.Stderr, "Using env fallback: project=%s, llm.enabled=%v, llm.url=%s\n",
-			cfg.ProjectID, cfg.LLM.Enabled, cfg.LLM.BaseURL)
+		cfg.applyEnvOverrides()
+		fmt.Fprintf(os.Stderr, "Using env fallback: project=%s\n", cfg.ProjectID)
 	} else {
-		fmt.Fprintf(os.Stderr, "Config loaded: project=%s, llm.enabled=%v, llm.url=%s\n",
-			cfg.ProjectID, cfg.LLM.Enabled, cfg.LLM.BaseURL)
+		fmt.Fprintf(os.Stderr, "Config loaded: project=%s\n", cfg.ProjectID)
 	}
 
-	client := tools.NewCIEClient(cfg.CIE.EdgeCache, cfg.ProjectID)
+	var client tools.Querier
+	var mode string
+	var projectID string
 
-	// Validate edge cache connection is configured
 	if cfg.CIE.EdgeCache == "" {
-		errors.FatalError(errors.NewNetworkError(
-			"Cannot start MCP server",
-			"CIE_BASE_URL is not set or Edge Cache is not configured",
-			"Set CIE_BASE_URL environment variable or check your .cie/project.yaml config",
-			fmt.Errorf("edge cache URL is empty"),
-		), false)
-	}
-
-	// Configure embedding for semantic search in analyze
-	client.SetEmbeddingConfig(cfg.Embedding.BaseURL, cfg.Embedding.Model)
-	fmt.Fprintf(os.Stderr, "  Embedding configured: %s (%s)\n", cfg.Embedding.BaseURL, cfg.Embedding.Model)
-
-	// Configure LLM provider if enabled
-	if cfg.LLM.Enabled && cfg.LLM.BaseURL != "" {
-		provider, err := llm.NewProvider(llm.ProviderConfig{
-			Type:         "openai", // All providers are OpenAI-compatible
-			BaseURL:      cfg.LLM.BaseURL,
-			DefaultModel: cfg.LLM.Model,
-			APIKey:       cfg.LLM.APIKey,
+		// Embedded mode — open CozoDB directly
+		backend, err := storage.NewEmbeddedBackend(storage.EmbeddedConfig{
+			ProjectID:           cfg.ProjectID,
+			Engine:              "rocksdb",
+			EmbeddingDimensions: cfg.Embedding.Dimensions,
 		})
 		if err != nil {
-			ue := errors.NewConfigError(
-				"Failed to configure LLM provider",
-				"LLM settings are invalid or the provider is unreachable",
-				"Check CIE_LLM_URL, CIE_LLM_MODEL, and CIE_LLM_API_KEY. Some features will be disabled.",
+			errors.FatalError(errors.NewDatabaseError(
+				"Cannot open local database",
+				"Failed to open CozoDB for embedded MCP mode",
+				"Check that ~/.cie/data/ is accessible. Run 'cie index' first if you haven't indexed yet.",
 				err,
-			)
-			fmt.Fprintf(os.Stderr, "%s\n", ue.Format(false))
-		} else {
-			client.SetLLMProvider(provider, cfg.LLM.MaxTokens)
-			fmt.Fprintf(os.Stderr, "  LLM configured: %s (%s)\n", cfg.LLM.BaseURL, cfg.LLM.Model)
+			), false)
 		}
+		// Register cleanup on signal
+		go func() {
+			sigCh := make(chan os.Signal, 1)
+			signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+			<-sigCh
+			_ = backend.Close()
+			os.Exit(0)
+		}()
+		client = tools.NewEmbeddedQuerier(backend)
+		mode = "embedded"
+		projectID = cfg.ProjectID
 	} else {
-		ue := errors.NewConfigError(
-			"No LLM provider available",
-			"Neither file-based config nor environment variables provided LLM settings",
-			"Some features will be disabled. Set CIE_LLM_URL, CIE_LLM_MODEL, or run 'cie init'.",
-			nil,
-		)
-		fmt.Fprintf(os.Stderr, "%s\n", ue.Format(false))
+		// Remote mode — use HTTP client
+		httpClient := tools.NewCIEClient(cfg.CIE.EdgeCache, cfg.ProjectID)
+
+		// Check if remote is reachable; if not and local data exists, auto-fallback to embedded
+		if !isReachable(cfg.CIE.EdgeCache) {
+			if hasLocalData(cfg.ProjectID) {
+				fmt.Fprintf(os.Stderr, "Warning: Edge Cache at %s is not reachable. Falling back to embedded mode.\n", cfg.CIE.EdgeCache)
+				fmt.Fprintf(os.Stderr, "  Tip: Remove 'edge_cache' from .cie/project.yaml or run 'cie init --force -y' to use embedded mode by default.\n")
+				backend, err := storage.NewEmbeddedBackend(storage.EmbeddedConfig{
+					ProjectID:           cfg.ProjectID,
+					Engine:              "rocksdb",
+					EmbeddingDimensions: cfg.Embedding.Dimensions,
+				})
+				if err != nil {
+					errors.FatalError(errors.NewDatabaseError(
+						"Cannot open local database",
+						"Edge Cache is not reachable and local database failed to open",
+						"Run 'cie init --force -y' to switch to embedded mode, then 'cie index' to index.",
+						err,
+					), false)
+				}
+				go func() {
+					sigCh := make(chan os.Signal, 1)
+					signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+					<-sigCh
+					_ = backend.Close()
+					os.Exit(0)
+				}()
+				client = tools.NewEmbeddedQuerier(backend)
+				mode = "embedded (fallback)"
+				projectID = cfg.ProjectID
+			} else {
+				fmt.Fprintf(os.Stderr, "Warning: Edge Cache at %s is not reachable and no local data found.\n", cfg.CIE.EdgeCache)
+				fmt.Fprintf(os.Stderr, "  Run 'cie init --force -y && cie index' to set up local mode.\n")
+				// Continue with remote client — tools will show connection errors with helpful messages
+				httpClient.SetEmbeddingConfig(cfg.Embedding.BaseURL, cfg.Embedding.Model)
+				client = httpClient
+				mode = "remote (unreachable)"
+				projectID = cfg.ProjectID
+			}
+		} else {
+			httpClient.SetEmbeddingConfig(cfg.Embedding.BaseURL, cfg.Embedding.Model)
+			client = httpClient
+			mode = "remote"
+			projectID = cfg.ProjectID
+		}
 	}
+
+	fmt.Fprintf(os.Stderr, "  Embedding configured: %s (%s)\n", cfg.Embedding.BaseURL, cfg.Embedding.Model)
 
 	server := &mcpServer{
 		client:         client,
+		projectID:      projectID,
+		mode:           mode,
 		embeddingURL:   cfg.Embedding.BaseURL,
 		embeddingModel: cfg.Embedding.Model,
 		customRoles:    cfg.Roles.Custom,
@@ -266,9 +308,11 @@ func runMCPServer(configPath string) {
 		}
 	}
 
-	fmt.Fprintf(os.Stderr, "CIE MCP Server v%s starting...\n", mcpVersion)
-	fmt.Fprintf(os.Stderr, "  Edge Cache: %s\n", server.client.BaseURL)
-	fmt.Fprintf(os.Stderr, "  Project: %s\n", server.client.ProjectID)
+	fmt.Fprintf(os.Stderr, "CIE MCP Server v%s starting (%s mode)...\n", mcpVersion, server.mode)
+	if server.mode == "remote" {
+		fmt.Fprintf(os.Stderr, "  Edge Cache: %s\n", cfg.CIE.EdgeCache)
+	}
+	fmt.Fprintf(os.Stderr, "  Project: %s\n", server.projectID)
 
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 1024*1024), 10*1024*1024)
@@ -1139,7 +1183,7 @@ func handleFindType(ctx context.Context, s *mcpServer, args map[string]any) (*to
 
 func handleIndexStatus(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
 	pathPattern, _ := args["path_pattern"].(string)
-	return tools.IndexStatus(ctx, s.client, pathPattern)
+	return tools.IndexStatus(ctx, s.client, pathPattern, s.projectID, s.mode)
 }
 
 func handleGrep(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
@@ -1297,15 +1341,21 @@ func (s *mcpServer) formatError(toolName string, err error) *mcpToolResult {
 	// Check for common error patterns
 	switch {
 	case tools.ContainsStr(errStr, "connection refused"):
-		msg = fmt.Sprintf("**Connection Error:** Cannot connect to Edge Cache at `%s`\n\n", s.client.BaseURL)
-		msg += "### Possible causes:\n"
-		msg += "1. Edge Cache server is not running\n"
-		msg += "2. The URL in `.cie/project.yaml` is incorrect\n"
-		msg += "3. Network/firewall is blocking the connection\n\n"
-		msg += "### How to fix:\n"
-		msg += fmt.Sprintf("- Check if Edge Cache is running: `curl %s/health`\n", s.client.BaseURL)
-		msg += "- Start Edge Cache: `cie edge-cache`\n"
-		msg += "- Verify the `edge_cache` URL in `.cie/project.yaml`\n"
+		if s.mode == "embedded" {
+			msg = "**Database Error:** Cannot read local database\n\n"
+			msg += "### How to fix:\n"
+			msg += "- Run 'cie index' to index the project first\n"
+			msg += "- Check that ~/.cie/data/ exists and is accessible\n"
+		} else {
+			msg = "**Connection Error:** Cannot connect to Edge Cache\n\n"
+			msg += "### Possible causes:\n"
+			msg += "1. Edge Cache server is not running\n"
+			msg += "2. The URL in `.cie/project.yaml` is incorrect\n"
+			msg += "3. Network/firewall is blocking the connection\n\n"
+			msg += "### How to fix:\n"
+			msg += "- Start Edge Cache: `cie edge-cache`\n"
+			msg += "- Verify the `edge_cache` URL in `.cie/project.yaml`\n"
+		}
 		suggestFallback = true
 
 	case tools.ContainsStr(errStr, "503") || tools.ContainsStr(errStr, "Service Unavailable"):
@@ -1339,7 +1389,7 @@ func (s *mcpServer) formatError(toolName string, err error) *mcpToolResult {
 		msg += "2. Project ID doesn't match\n\n"
 		msg += "### How to fix:\n"
 		msg += "- Run `cie index` to index the project\n"
-		msg += fmt.Sprintf("- Check that project_id is `%s` in `.cie/project.yaml`\n", s.client.ProjectID)
+		msg += fmt.Sprintf("- Check that project_id is `%s` in `.cie/project.yaml`\n", s.projectID)
 		suggestFallback = true
 
 	case tools.ContainsStr(errStr, "timeout") || tools.ContainsStr(errStr, "deadline exceeded"):
@@ -1499,4 +1549,26 @@ func getFloatArg(args map[string]interface{}, key string, fallback float64) (flo
 		}
 	}
 	return fallback, false
+}
+
+// isReachable checks if a URL responds within a short timeout.
+func isReachable(url string) bool {
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(url + "/health")
+	if err != nil {
+		return false
+	}
+	_ = resp.Body.Close()
+	return true
+}
+
+// hasLocalData checks if there's an existing CozoDB database for the project.
+func hasLocalData(projectID string) bool {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	dataDir := filepath.Join(homeDir, ".cie", "data", projectID)
+	info, err := os.Stat(dataDir)
+	return err == nil && info.IsDir()
 }

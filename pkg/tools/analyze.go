@@ -25,8 +25,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-
-	"github.com/kraklabs/cie/pkg/llm"
 )
 
 // AnalyzeArgs holds arguments for the analyze tool.
@@ -241,7 +239,7 @@ type analyzeState struct {
 	args           AnalyzeArgs
 }
 
-// Analyze uses semantic search + LLM to answer architectural questions about the codebase
+// Analyze uses semantic search to answer architectural questions about the codebase
 func Analyze(ctx context.Context, client Querier, args AnalyzeArgs) (*ToolResult, error) {
 	if args.Question == "" {
 		return NewError("Error: 'question' is required"), nil
@@ -538,34 +536,6 @@ func (s *analyzeState) buildOutput(ctx context.Context, client Querier) (*ToolRe
 		}
 	}
 
-	// Merge localized + global for code context (localized first, they're more relevant)
-	allRelevantFuncs := append(s.localizedFuncs, s.globalFuncs...)
-
-	// Generate LLM narrative with code context (if CIEClient with LLM configured)
-	var llmClient llm.Provider
-	var llmMaxTokens int
-	if cieClient, ok := client.(*CIEClient); ok {
-		llmClient = cieClient.LLMClient
-		llmMaxTokens = cieClient.LLMMaxTokens
-	}
-
-	if llmClient != nil && (len(s.sections) > 1 || len(allRelevantFuncs) > 0) {
-		// Build enriched context with actual code
-		codeContext := buildCodeContext(allRelevantFuncs)
-		narrative, err := generateNarrativeWithCode(ctx, llmClient, s.args.Question, output, codeContext, llmMaxTokens)
-		if err != nil {
-			output += fmt.Sprintf("\n---\n_LLM narrative generation failed: %v_\n", err)
-		} else if narrative != "" {
-			// Prepend narrative summary
-			output = fmt.Sprintf("# Analysis: %s\n\n", s.args.Question) +
-				narrative +
-				"\n\n---\n\n## Raw Analysis Data\n\n" +
-				strings.TrimPrefix(output, fmt.Sprintf("# Analysis: %s\n\n", s.args.Question))
-		}
-	} else if llmClient == nil {
-		output += "\n---\n_Note: LLM not configured. Run `cie init` to enable narrative generation._\n"
-	}
-
 	return NewResult(output), nil
 }
 
@@ -808,99 +778,6 @@ func getFunctionCodeByName(ctx context.Context, client Querier, name, filePath s
 	return AnyToString(result.Rows[0][0]), nil
 }
 
-// buildCodeContext creates a formatted code context string for the LLM
-func buildCodeContext(funcs []relevantFunction) string {
-	if len(funcs) == 0 {
-		return ""
-	}
-
-	var sb strings.Builder
-	var stubCount int
-
-	// Count stubs first
-	for _, f := range funcs {
-		if f.StubInfo != nil && f.StubInfo.IsStub {
-			stubCount++
-		}
-	}
-
-	sb.WriteString("\n\n## Relevant Code\n\n")
-
-	// Add stub warning if any detected
-	if stubCount > 0 {
-		sb.WriteString(fmt.Sprintf("**⚠️ WARNING: %d function(s) detected as stubs/not implemented. See [STUB] markers below.**\n\n", stubCount))
-	}
-
-	for i, f := range funcs {
-		if f.Code == "" {
-			continue
-		}
-
-		// Mark stubs prominently
-		if f.StubInfo != nil && f.StubInfo.IsStub {
-			sb.WriteString(fmt.Sprintf("### %d. %s [⚠️ STUB] (%s:%s)\n", i+1, f.Name, f.FilePath, f.StartLine))
-			sb.WriteString(fmt.Sprintf("**Stub reason:** %s\n\n", f.StubInfo.Reason))
-		} else {
-			sb.WriteString(fmt.Sprintf("### %d. %s (%s:%s)\n", i+1, f.Name, f.FilePath, f.StartLine))
-		}
-
-		// Detect language for syntax highlighting
-		lang := detectLanguage(f.FilePath)
-		if lang == "unknown" {
-			lang = "go" // default
-		}
-		sb.WriteString(fmt.Sprintf("```%s\n", lang))
-		sb.WriteString(f.Code)
-		sb.WriteString("\n```\n\n")
-	}
-
-	return sb.String()
-}
-
-// generateNarrativeWithCode generates a narrative that incorporates code context
-func generateNarrativeWithCode(ctx context.Context, provider llm.Provider, question, analysisData, codeContext string, maxTokens int) (string, error) {
-	if maxTokens <= 0 {
-		maxTokens = 2000
-	}
-
-	prompt := fmt.Sprintf(`Analyze this codebase to answer the user's question.
-
-**User Question:** %s
-
-**Analysis Data:**
-%s
-%s
-
-**Instructions:**
-- Answer the user's question directly and thoroughly (3-5 paragraphs)
-- Reference specific function names and file paths from the results
-- When explaining code, use ONLY the actual snippets provided in the "Relevant Code" section above
-- NEVER invent, generate, or create placeholder code snippets - only quote from what is provided
-- If you need to show code, copy it EXACTLY from the provided snippets
-- Identify patterns, relationships, and architectural decisions
-- Be specific - mention actual names, not generic descriptions
-- If the question asks about a specific topic, focus your explanation on that topic
-
-**CRITICAL - Stub Detection:**
-- Functions marked with [⚠️ STUB] are NOT actually implemented - they return errors like "not implemented" or have empty bodies
-- DO NOT claim these functions provide real functionality - they are placeholders
-- When comparing implementations, clearly distinguish between real implementations and stubs
-- If a feature appears to exist structurally but is marked as STUB, report it as "not implemented" or "placeholder only"`, question, analysisData, codeContext)
-
-	resp, err := provider.Chat(ctx, llm.ChatRequest{
-		Messages: []llm.Message{
-			{Role: "system", Content: "You are a senior software architect analyzing code. Provide clear, specific, and thorough explanations. Always reference actual function and file names from the provided data."},
-			{Role: "user", Content: prompt},
-		},
-		MaxTokens:   maxTokens,
-		Temperature: 0.3,
-	})
-	if err != nil {
-		return "", err
-	}
-
-	return "## Summary\n\n" + resp.Message.Content, nil
-}
 
 // countWithFallback tries count aggregation first, falls back to row counting
 func countWithFallback(ctx context.Context, client Querier, name, countQuery, listQuery string) int {

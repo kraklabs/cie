@@ -26,7 +26,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kraklabs/cie/pkg/llm"
 )
 
 // TestNewCIEClient tests client initialization.
@@ -222,33 +221,6 @@ func TestCIEClient_QueryRaw_MalformedJSON(t *testing.T) {
 	assertContains(t, err.Error(), "parse response")
 }
 
-// TestCIEClient_SetLLMProvider tests LLM provider configuration.
-func TestCIEClient_SetLLMProvider(t *testing.T) {
-	client := NewCIEClient("http://localhost:8080", "test-project")
-	mockProvider := &mockLLMProvider{}
-
-	// Test with custom maxTokens
-	client.SetLLMProvider(mockProvider, 3000)
-	if client.LLMClient == nil {
-		t.Error("LLMClient not set")
-	}
-	if client.LLMMaxTokens != 3000 {
-		t.Errorf("LLMMaxTokens = %d; want 3000", client.LLMMaxTokens)
-	}
-
-	// Test with zero maxTokens (should default to 2000)
-	client.SetLLMProvider(mockProvider, 0)
-	if client.LLMMaxTokens != 2000 {
-		t.Errorf("LLMMaxTokens = %d; want 2000 (default)", client.LLMMaxTokens)
-	}
-
-	// Test with negative maxTokens (should default to 2000)
-	client.SetLLMProvider(mockProvider, -100)
-	if client.LLMMaxTokens != 2000 {
-		t.Errorf("LLMMaxTokens = %d; want 2000 (default)", client.LLMMaxTokens)
-	}
-}
-
 // TestCIEClient_SetEmbeddingConfig tests embedding configuration.
 func TestCIEClient_SetEmbeddingConfig(t *testing.T) {
 	client := NewCIEClient("http://localhost:8080", "test-project")
@@ -287,24 +259,3 @@ func TestCIEClient_Query_EmptyResponse(t *testing.T) {
 	}
 }
 
-// mockLLMProvider is a mock implementation of llm.Provider for testing.
-type mockLLMProvider struct{}
-
-func (m *mockLLMProvider) Generate(ctx context.Context, req llm.GenerateRequest) (*llm.GenerateResponse, error) {
-	return &llm.GenerateResponse{Text: "mock response", Done: true}, nil
-}
-
-func (m *mockLLMProvider) Chat(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
-	return &llm.ChatResponse{
-		Message: llm.Message{Role: "assistant", Content: "mock response"},
-		Done:    true,
-	}, nil
-}
-
-func (m *mockLLMProvider) Name() string {
-	return "mock"
-}
-
-func (m *mockLLMProvider) Models(ctx context.Context) ([]string, error) {
-	return []string{"mock-model"}, nil
-}
