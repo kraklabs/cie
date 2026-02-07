@@ -560,9 +560,11 @@ func (r *CallResolver) resolveToImplementations(callerID, methodName, fieldType 
 	stubID := generateExternalStubID(fieldType, methodName)
 	r.qualifiedFunctions[qualifiedName] = stubID
 	r.stubFunctions = append(r.stubFunctions, FunctionEntity{
-		ID:       stubID,
-		Name:     qualifiedName,
-		FilePath: "<external>",
+		ID:        stubID,
+		Name:      qualifiedName,
+		FilePath:  "<external>",
+		StartLine: 1,
+		EndLine:   1,
 	})
 	return []CallsEdge{{CallerID: callerID, CalleeID: stubID}}
 }
