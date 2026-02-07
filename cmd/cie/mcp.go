@@ -37,7 +37,7 @@ import (
 )
 
 const (
-	mcpVersion    = "1.8.0" // Standalone function interface dispatch, trace waypoints
+	mcpVersion    = "1.9.0" // Case-insensitive search, fuzzy suggestions, find-by-signature
 	mcpServerName = "cie"
 )
 

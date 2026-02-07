@@ -5,6 +5,16 @@ All notable changes to CIE (Code Intelligence Engine) will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.4] - 2026-02-07
+
+### Added
+- **Case-insensitive function matching** — `cie_find_function` and `cie_trace_path` now match function names case-insensitively when `exact_match=false`. Searching `runquery` now finds `CozoDB.runQuery`.
+- **"Did you mean?" suggestions** — When `cie_trace_path` can't find a target, source, or waypoint function, it suggests similar function names with file locations instead of a bare "not found" error.
+- **`cie_find_by_signature` tool** — New MCP tool to search functions by parameter type or return type. Useful for discovering all functions accepting a specific interface or struct (e.g., `param_type="Querier"` finds all functions taking a `Querier` parameter).
+
+### Changed
+- MCP server version bumped to 1.9.0.
+
 ## [0.7.3] - 2026-02-07
 
 ### Added
@@ -242,7 +252,8 @@ Initial open source release of CIE (Code Intelligence Engine).
 - No hardcoded credentials in codebase
 - All API keys via environment variables only
 
-[unreleased]: https://github.com/kraklabs/cie/compare/v0.7.3...HEAD
+[unreleased]: https://github.com/kraklabs/cie/compare/v0.7.4...HEAD
+[0.7.4]: https://github.com/kraklabs/cie/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/kraklabs/cie/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/kraklabs/cie/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/kraklabs/cie/compare/v0.7.0...v0.7.1

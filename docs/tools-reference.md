@@ -20,6 +20,7 @@ Complete reference for all CIE MCP tools. Each tool is documented with parameter
 | Trace call path to function | `cie_trace_path` | `target="RegisterRoutes"` |
 | Search by meaning/concept | `cie_semantic_search` | `query="authentication logic"` |
 | Answer architectural questions | `cie_analyze` | `question="What are entry points?"` |
+| Find functions by param/return type | `cie_find_by_signature` | `param_type="Querier"` |
 | Find function by name | `cie_find_function` | `name="BuildRouter"` |
 | What calls this function? | `cie_find_callers` | `function_name="HandleAuth"` |
 | What does this function call? | `cie_find_callees` | `function_name="HandleAuth"` |
@@ -330,6 +331,73 @@ No violations found. All 4 patterns are absent from:
 ---
 
 ## Navigation Tools
+
+### cie_find_by_signature
+
+Find functions by parameter type or return type. Useful for discovering which functions accept a specific interface or struct as input, or which functions return a given type.
+
+**Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `param_type` | string | No* | — | Base type name to search in parameters (e.g., "Backend", "Querier"). Matches regardless of pointer/slice/package prefix. |
+| `return_type` | string | No* | — | Type name to search in return values (e.g., "error", "Client") |
+| `path_pattern` | string | No | — | Filter by file path regex |
+| `exclude_pattern` | string | No | — | Exclude files matching regex |
+| `limit` | int | No | 20 | Maximum number of results to return |
+
+\* At least one of `param_type` or `return_type` must be provided.
+
+**Example:**
+
+```json
+{
+  "param_type": "Querier",
+  "path_pattern": "pkg/tools",
+  "limit": 10
+}
+```
+
+**Return type search:**
+
+```json
+{
+  "return_type": "error",
+  "path_pattern": "internal/auth",
+  "limit": 15
+}
+```
+
+**Output:**
+
+```markdown
+## Functions with parameter type `Querier`
+
+Found 5 functions:
+
+**IndexStatus** (pkg/tools/status.go:23)
+  Signature: func IndexStatus(ctx context.Context, client Querier, projectID string) (string, error)
+  Parameter: `client` (Querier)
+
+**FindFunction** (pkg/tools/search.go:130)
+  Signature: func FindFunction(ctx context.Context, client Querier, args FindFunctionArgs) (string, error)
+  Parameter: `client` (Querier)
+```
+
+**Tips:**
+
+- **Type-based discovery** - Find all functions that accept or return a specific type
+- **Interface exploration** - Search `param_type="Querier"` to see all consumers of an interface
+- **Smart matching** - Matches base type name regardless of `*`, `[]`, or package prefix (e.g., `*storage.Backend` matches `Backend`)
+- **Combine filters** - Use `path_pattern` to scope to specific packages
+
+**Common Mistakes:**
+
+- No Providing neither `param_type` nor `return_type` (at least one is required)
+- No Using full qualified type name (use base name "Backend" not "storage.Backend")
+- Yes Combine with `cie_find_implementations` to see interface consumers and implementors
+
+---
 
 ### cie_find_function
 
@@ -1949,4 +2017,4 @@ Set `full_code=true` parameter:
 
 **Last Updated:** 2026-02-07
 **Schema Version:** v3
-**CIE Version:** 0.7.3+
+**CIE Version:** 0.7.4+
