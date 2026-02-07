@@ -15,7 +15,7 @@
 //	err := errors.NewConfigError(
 //	    "Cannot open CIE database",
 //	    "The database file is locked by another process",
-//	    "Close other CIE instances or run: cie reset --force",
+//	    "Close other CIE instances or run: cie reset --yes",
 //	    underlyingErr,
 //	)
 //	if err != nil {
@@ -30,14 +30,14 @@
 //	err := errors.NewDatabaseError(
 //	    "Cannot open CIE database",
 //	    "The database file is locked by another process",
-//	    "Close other CIE instances or run: cie reset --force",
+//	    "Close other CIE instances or run: cie reset --yes",
 //	    underlyingErr,
 //	)
 //	fmt.Fprint(os.Stderr, err.Format(false))
 //	// Output (with colors):
 //	// Error: Cannot open CIE database
 //	// Cause: The database file is locked by another process
-//	// Fix:   Close other CIE instances or run: cie reset --force
+//	// Fix:   Close other CIE instances or run: cie reset --yes
 //
 // For JSON output:
 //
@@ -47,7 +47,7 @@
 //	// {
 //	//   "error": "Cannot open CIE database",
 //	//   "cause": "The database file is locked by another process",
-//	//   "fix": "Close other CIE instances or run: cie reset --force",
+//	//   "fix": "Close other CIE instances or run: cie reset --yes",
 //	//   "exit_code": 2
 //	// }
 //
@@ -179,7 +179,7 @@ func NewConfigError(msg, cause, fix string, err error) *UserError {
 //	return NewDatabaseError(
 //	    "Cannot open CIE database",
 //	    "The database file is locked by another process",
-//	    "Close other CIE instances or run: cie reset --force",
+//	    "Close other CIE instances or run: cie reset --yes",
 //	    err,
 //	)
 func NewDatabaseError(msg, cause, fix string, err error) *UserError {
@@ -323,7 +323,7 @@ var (
 //
 //	Error: Cannot open the CIE database
 //	Cause: The database file is locked by another process
-//	Fix:   Close other CIE instances or run: cie reset --force
+//	Fix:   Close other CIE instances or run: cie reset --yes
 //
 // Empty Cause or Fix fields are omitted from the output.
 //

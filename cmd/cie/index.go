@@ -361,7 +361,7 @@ func runLocalIndex(ctx context.Context, logger *slog.Logger, cfg *Config, repoPa
 		errors.FatalError(errors.NewDatabaseError(
 			"Indexing operation failed",
 			"An error occurred during repository indexing",
-			"Check the error details above. If this persists, try 'cie reset --force'",
+			"Check the error details above. If this persists, try 'cie reset --yes'",
 			err,
 		), false)
 	}

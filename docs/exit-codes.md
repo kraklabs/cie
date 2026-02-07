@@ -66,7 +66,7 @@ Database operation failures including file locks, corruption, or transaction err
 ```
 Error: Cannot open CIE database
 Cause: The database file is locked by another process
-Fix:   Close other CIE instances or run: cie reset --force
+Fix:   Close other CIE instances or run: cie reset --yes
 ```
 
 **Resolution:**
@@ -75,7 +75,7 @@ Fix:   Close other CIE instances or run: cie reset --force
 pgrep -f cie
 
 # Force reset if needed (destroys index)
-cie reset --force
+cie reset --yes
 ```
 
 ### Exit Code 3: Network Error
@@ -237,7 +237,7 @@ case $exit_code in
         ;;
     2)
         echo "Database error: Attempting reset..."
-        cie reset --force
+        cie reset --yes
         cie index
         ;;
     3)
