@@ -5,6 +5,19 @@ All notable changes to CIE (Code Intelligence Engine) will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.3] - 2026-02-07
+
+### Added
+- **Standalone function interface dispatch** — Interface calls in non-method functions are now resolved. Previously, calls like `client.StoreFact()` inside `func storeFact(client Querier, ...)` were invisible because the resolver only inspected struct fields. Now parses function signatures to match parameter names against callee prefixes and resolves through `cie_implements`.
+- **Query-time dispatch fallback** — For indexes built before this release, `cie_trace_path` and `cie_find_callees` resolve interface calls at query time by parsing function signatures. No re-indexing required for basic functionality.
+- **Interface boundary detection** — When `cie_trace_path` fails to reach a target, it now detects interface boundaries and reports which interface types blocked resolution, with actionable suggestions (`cie_find_implementations`, re-index).
+- **Waypoint support for `cie_trace_path`** — New `waypoints` parameter chains BFS segments through intermediate functions (`source -> wp1 -> wp2 -> target`). Reports which segment failed when a waypoint chain breaks.
+- **`pkg/sigparse` package** — Dependency-free Go function signature parser, shared by both ingestion and trace subsystems to avoid import cycles.
+
+### Changed
+- `CallResolver.resolveInterfaceCall` now tries field-based resolution first (existing behavior), then falls back to param-based resolution for standalone functions and method params.
+- MCP server version bumped to 1.8.0.
+
 ## [0.7.2] - 2026-02-07
 
 ### Fixed
@@ -229,7 +242,8 @@ Initial open source release of CIE (Code Intelligence Engine).
 - No hardcoded credentials in codebase
 - All API keys via environment variables only
 
-[unreleased]: https://github.com/kraklabs/cie/compare/v0.7.1...HEAD
+[unreleased]: https://github.com/kraklabs/cie/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/kraklabs/cie/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/kraklabs/cie/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/kraklabs/cie/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/kraklabs/cie/compare/v0.6.0...v0.7.0

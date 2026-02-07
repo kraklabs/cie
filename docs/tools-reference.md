@@ -956,6 +956,7 @@ Trace call paths from source function(s) to a target function. Shows execution f
 | `path_pattern` | string | No | — | Filter by file path to narrow search scope |
 | `max_paths` | int | No | 3 | Maximum number of paths to return |
 | `max_depth` | int | No | 10 | Maximum call depth to search |
+| `waypoints` | []string | No | — | Intermediate functions the path must pass through, in order (chains BFS segments) |
 
 **Example:**
 
@@ -974,6 +975,16 @@ Trace call paths from source function(s) to a target function. Shows execution f
   "target": "SaveUser",
   "source": "HandleCreateUser",
   "path_pattern": "internal/"
+}
+```
+
+**With waypoints (chain through intermediate functions):**
+
+```json
+{
+  "target": "StoreFact",
+  "source": "main",
+  "waypoints": ["Run", "processQuery"]
 }
 ```
 
@@ -1009,6 +1020,7 @@ Found 2 paths from entry points:
 
 -  **Auto-detect entry points** - Leave `source` empty to trace from main/entry points
 -  **Trace between arbitrary functions** - Set both `source` and `target` for specific flow
+-  **Use waypoints for long paths** - Chain through known intermediate functions when source and target are far apart
 - 📊 **Increase `max_paths` for complex flows** - Default 3 may miss alternate paths
 - 🧹 **Use `path_pattern` to focus** - Narrows search to specific module
 -  **BFS search** - Returns shortest paths first
@@ -1935,6 +1947,6 @@ Set `full_code=true` parameter:
 
 ---
 
-**Last Updated:** 2026-02-01
+**Last Updated:** 2026-02-07
 **Schema Version:** v3
-**CIE Version:** 0.5.0+
+**CIE Version:** 0.7.3+

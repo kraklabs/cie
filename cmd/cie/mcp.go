@@ -37,7 +37,7 @@ import (
 )
 
 const (
-	mcpVersion    = "1.7.1" // Fix cross-package interface dispatch and trace diagnostics
+	mcpVersion    = "1.8.0" // Standalone function interface dispatch, trace waypoints
 	mcpServerName = "cie"
 )
 
