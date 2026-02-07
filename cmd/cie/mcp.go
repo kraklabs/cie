@@ -1028,6 +1028,11 @@ func (s *mcpServer) getTools() []mcpTool {
 						"type":        "string",
 						"description": "Optional: filter by file path to narrow the search scope (e.g., 'apps/gateway', 'src/server')",
 					},
+					"waypoints": map[string]any{
+						"type":        "array",
+						"items":       map[string]any{"type": "string"},
+						"description": "Optional: intermediate function names the path must pass through, in order. Chains BFS segments: source → wp1 → wp2 → ... → target. Useful when functions are far apart or when you know intermediate steps.",
+					},
 				},
 				"required": []string{"target"},
 			},
@@ -1401,12 +1406,14 @@ func handleTracePath(ctx context.Context, s *mcpServer, args map[string]any) (*t
 	pathPattern, _ := args["path_pattern"].(string)
 	maxPaths, _ := getIntArg(args, "max_paths", 3)
 	maxDepth, _ := getIntArg(args, "max_depth", 5)
+	waypoints := extractStringArray(args, "waypoints")
 	return tools.TracePath(ctx, s.client, tools.TracePathArgs{
 		Target:      target,
 		Source:      source,
 		PathPattern: pathPattern,
 		MaxPaths:    maxPaths,
 		MaxDepth:    maxDepth,
+		Waypoints:   waypoints,
 	})
 }
 

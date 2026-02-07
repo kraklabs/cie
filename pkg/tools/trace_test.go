@@ -521,6 +521,37 @@ func TestFormatTraceOutput_Unit_SinglePath(t *testing.T) {
 }
 
 // Test formatTraceNotFound
+func TestFormatTraceNotFound_InterfaceBoundary(t *testing.T) {
+	sources := []TraceFuncInfo{{Name: "main", FilePath: "cmd/main.go", Line: "1"}}
+	args := TracePathArgs{Target: "unreachable", MaxPaths: 3, MaxDepth: 10}
+	result := traceSearchResult{
+		nodesExplored: 50,
+		deepestPath: []TraceFuncInfo{
+			{Name: "main", FilePath: "cmd/main.go", Line: "1"},
+			{Name: "storeFact", FilePath: "pkg/store.go", Line: "10"},
+		},
+		interfaceBoundary: &interfaceBoundaryInfo{
+			FunctionName:   "storeFact",
+			InterfaceNames: []string{"Querier"},
+		},
+	}
+
+	output := formatTraceNotFound(sources, args, result)
+
+	if !strings.Contains(output, "Interface boundary detected") {
+		t.Error("should mention interface boundary")
+	}
+	if !strings.Contains(output, "Querier") {
+		t.Error("should mention the interface name")
+	}
+	if !strings.Contains(output, "cie_find_implementations") {
+		t.Error("should suggest cie_find_implementations")
+	}
+	if !strings.Contains(output, "cie index --full") {
+		t.Error("should suggest re-indexing")
+	}
+}
+
 func TestFormatTraceNotFound_Unit(t *testing.T) {
 	sources := []TraceFuncInfo{{Name: "main", FilePath: "cmd/main.go", Line: "1"}}
 	args := TracePathArgs{Target: "unreachable", MaxPaths: 3, MaxDepth: 10}
@@ -941,7 +972,7 @@ func TestGetCallees_InterfaceDispatch_Dedup(t *testing.T) {
 	}
 }
 
-// Test that getCallees skips interface dispatch for non-method functions
+// Test that getCallees issues param dispatch for non-method functions
 func TestGetCallees_InterfaceDispatch_NonMethod(t *testing.T) {
 	queryCalls := 0
 	client := NewMockClientCustom(
@@ -955,9 +986,139 @@ func TestGetCallees_InterfaceDispatch_NonMethod(t *testing.T) {
 
 	_ = getCallees(ctx, client, "main") // plain function, not a method
 
-	// Should only issue the cie_calls query, not the dispatch query
-	if queryCalls != 1 {
-		t.Errorf("getCallees(\"main\") issued %d queries, want 1 (no dispatch for non-method)", queryCalls)
+	// Should issue: 1) cie_calls query, 2) signature query for param dispatch
+	// (no field dispatch since main is not a method)
+	if queryCalls != 2 {
+		t.Errorf("getCallees(\"main\") issued %d queries, want 2 (cie_calls + signature lookup)", queryCalls)
+	}
+}
+
+// Test getCallees with param-based interface dispatch for standalone functions
+func TestGetCallees_StandaloneFunction_InterfaceDispatch(t *testing.T) {
+	client := NewMockClientCustom(
+		func(ctx context.Context, script string) (*QueryResult, error) {
+			// Direct callees query (cie_calls)
+			if strings.Contains(script, "cie_calls") {
+				return &QueryResult{
+					Headers: []string{"callee_name", "callee_file", "callee_line"},
+					Rows:    [][]any{}, // No direct callees
+				}, nil
+			}
+			// Signature query
+			if strings.Contains(script, "signature") && !strings.Contains(script, "cie_implements") {
+				return &QueryResult{
+					Headers: []string{"signature"},
+					Rows:    [][]any{{"func storeFact(client Querier, fact string) error"}},
+				}, nil
+			}
+			// Implementation query for Querier
+			if strings.Contains(script, "cie_implements") {
+				return &QueryResult{
+					Headers: []string{"callee_name", "callee_file", "callee_line"},
+					Rows: [][]any{
+						{"CIEClient.Query", "pkg/tools/client.go", 50},
+						{"CIEClient.QueryRaw", "pkg/tools/client.go", 80},
+						{"EmbeddedQuerier.Query", "pkg/tools/embedded.go", 30},
+						{"EmbeddedQuerier.QueryRaw", "pkg/tools/embedded.go", 60},
+					},
+				}, nil
+			}
+			return &QueryResult{Headers: []string{}, Rows: [][]any{}}, nil
+		},
+		nil,
+	)
+	ctx := context.Background()
+
+	callees := getCallees(ctx, client, "storeFact")
+
+	if len(callees) != 4 {
+		t.Fatalf("getCallees(\"storeFact\") returned %d callees, want 4", len(callees))
+	}
+
+	names := map[string]bool{}
+	for _, c := range callees {
+		names[c.Name] = true
+	}
+	if !names["CIEClient.Query"] {
+		t.Error("should include CIEClient.Query")
+	}
+	if !names["EmbeddedQuerier.Query"] {
+		t.Error("should include EmbeddedQuerier.Query")
+	}
+}
+
+// Test TracePath with waypoints: main → middleware → handler → saveToDb
+func TestTracePath_Unit_WithWaypoints(t *testing.T) {
+	functions := map[string]TraceFuncInfo{
+		"main":       {Name: "main", FilePath: "cmd/main.go", Line: "1"},
+		"middleware": {Name: "middleware", FilePath: "internal/mid.go", Line: "10"},
+		"handler":    {Name: "handler", FilePath: "internal/handler.go", Line: "20"},
+		"saveToDb":   {Name: "saveToDb", FilePath: "internal/db.go", Line: "30"},
+	}
+	callGraph := map[string][]string{
+		"main":       {"middleware"},
+		"middleware": {"handler"},
+		"handler":    {"saveToDb"},
+		"saveToDb":   {},
+	}
+
+	client := createMockCallGraph(functions, callGraph)
+	ctx := context.Background()
+
+	result, err := TracePath(ctx, client, TracePathArgs{
+		Target:    "saveToDb",
+		Source:    "main",
+		MaxPaths:  3,
+		MaxDepth:  10,
+		Waypoints: []string{"middleware", "handler"},
+	})
+	if err != nil {
+		t.Fatalf("TracePath() error = %v", err)
+	}
+
+	// Should find the full path through waypoints
+	for _, fn := range []string{"main", "middleware", "handler", "saveToDb"} {
+		if !strings.Contains(result.Text, fn) {
+			t.Errorf("TracePath() should contain %q, got:\n%s", fn, result.Text)
+		}
+	}
+	if !strings.Contains(result.Text, "waypoint") {
+		t.Errorf("TracePath() should mention waypoints, got:\n%s", result.Text)
+	}
+}
+
+// Test TracePath with waypoints where a segment fails
+func TestTracePath_Unit_WaypointSegmentFails(t *testing.T) {
+	functions := map[string]TraceFuncInfo{
+		"main":     {Name: "main", FilePath: "cmd/main.go", Line: "1"},
+		"funcA":    {Name: "funcA", FilePath: "internal/a.go", Line: "10"},
+		"funcB":    {Name: "funcB", FilePath: "internal/b.go", Line: "20"},
+		"saveToDb": {Name: "saveToDb", FilePath: "internal/db.go", Line: "30"},
+	}
+	callGraph := map[string][]string{
+		"main":     {"funcA"},
+		"funcA":    {},         // funcA does NOT call funcB
+		"funcB":    {"saveToDb"},
+		"saveToDb": {},
+	}
+
+	client := createMockCallGraph(functions, callGraph)
+	ctx := context.Background()
+
+	result, err := TracePath(ctx, client, TracePathArgs{
+		Target:    "saveToDb",
+		Source:    "main",
+		MaxPaths:  3,
+		MaxDepth:  10,
+		Waypoints: []string{"funcA", "funcB"},
+	})
+	if err != nil {
+		t.Fatalf("TracePath() error = %v", err)
+	}
+
+	// Should report which segment failed
+	if !strings.Contains(result.Text, "segment") {
+		t.Errorf("TracePath() should mention the failing segment, got:\n%s", result.Text)
 	}
 }
 

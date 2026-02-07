@@ -56,6 +56,8 @@ type CallResolver struct {
 	qualifiedFunctions map[string]string
 	// functionIDToName: function_id → function_name
 	functionIDToName map[string]string
+	// functionIDToSignature: function_id → full signature string
+	functionIDToSignature map[string]string
 }
 
 // NewCallResolver creates a new call resolver.
@@ -69,6 +71,7 @@ func NewCallResolver() *CallResolver {
 		implementsIndex:         make(map[string][]string),
 		qualifiedFunctions:      make(map[string]string),
 		functionIDToName:        make(map[string]string),
+		functionIDToSignature:   make(map[string]string),
 	}
 }
 
@@ -121,6 +124,9 @@ func (r *CallResolver) BuildIndex(
 			r.qualifiedFunctions[fn.Name] = fn.ID
 		}
 		r.functionIDToName[fn.ID] = fn.Name
+		if fn.Signature != "" {
+			r.functionIDToSignature[fn.ID] = fn.Signature
+		}
 	}
 
 	// 3. Build file imports index
@@ -418,6 +424,11 @@ func (r *CallResolver) SetInterfaceIndex(fields []FieldEntity, implements []Impl
 // resolveInterfaceCall resolves a call like "field.Method" through interface dispatch.
 // Returns multiple CallsEdge (one per implementing type) or nil if resolution fails.
 //
+// Uses two resolution strategies:
+//  1. Field-based: for struct methods, look up the struct's interface-typed fields
+//  2. Param-based: for standalone functions (or method fallback), parse the signature
+//     to find interface-typed parameters
+//
 // Handles chained access patterns common in Go:
 //   - "s.querier.StoreFact" → receiver="s", field="querier", method="StoreFact"
 //   - "querier.StoreFact"   → field="querier", method="StoreFact" (no receiver prefix)
@@ -426,25 +437,31 @@ func (r *CallResolver) resolveInterfaceCall(call UnresolvedCall) []CallsEdge {
 		return nil
 	}
 
-	// Get the caller's struct name from its function name (e.g., "Builder.Build" → "Builder")
 	callerName := r.functionIDToName[call.CallerID]
-	if !strings.Contains(callerName, ".") {
-		return nil
+
+	// Try field-based resolution first (for struct methods)
+	if strings.Contains(callerName, ".") {
+		edges := r.resolveInterfaceCallViaFields(call, callerName)
+		if len(edges) > 0 {
+			return edges
+		}
 	}
+
+	// Fall back to param-based resolution (standalone functions and method params)
+	return r.resolveInterfaceCallViaParams(call)
+}
+
+// resolveInterfaceCallViaFields resolves through struct field types.
+// This is the original behavior for struct methods like Builder.Build calling b.writer.Write.
+func (r *CallResolver) resolveInterfaceCallViaFields(call UnresolvedCall, callerName string) []CallsEdge {
 	structName := strings.SplitN(callerName, ".", 2)[0]
 
-	// Extract field name and method name from the callee name.
-	// The callee can be:
-	//   "s.querier.StoreFact" → parts ["s", "querier", "StoreFact"] → field="querier", method="StoreFact"
-	//   "querier.StoreFact"   → parts ["querier", "StoreFact"]      → field="querier", method="StoreFact"
 	parts := strings.Split(call.CalleeName, ".")
 	if len(parts) < 2 {
 		return nil
 	}
 	methodName := parts[len(parts)-1]
 
-	// Try each potential field name candidate from right to left (skip the method at the end).
-	// For "a.b.c.Method", candidates are ["c", "b", "a"].
 	fieldTypes, found := r.fieldIndex[structName]
 	if !found {
 		return nil
@@ -461,24 +478,64 @@ func (r *CallResolver) resolveInterfaceCall(call UnresolvedCall) []CallsEdge {
 		return nil
 	}
 
-	// Look up implementing types
+	return r.resolveToImplementations(call.CallerID, methodName, interfaceType)
+}
+
+// resolveInterfaceCallViaParams resolves through function parameter types.
+// For standalone functions like `func storeFact(client Querier, fact string)`,
+// matches the callee prefix (e.g., "client" from "client.StoreFact") against
+// parameter names, then resolves through the implements index.
+func (r *CallResolver) resolveInterfaceCallViaParams(call UnresolvedCall) []CallsEdge {
+	sig := r.functionIDToSignature[call.CallerID]
+	if sig == "" {
+		return nil
+	}
+
+	params := ParseGoSignatureParams(sig)
+	if len(params) == 0 {
+		return nil
+	}
+
+	parts := strings.Split(call.CalleeName, ".")
+	if len(parts) < 2 {
+		return nil
+	}
+	methodName := parts[len(parts)-1]
+
+	// Match callee prefix against parameter names (right-to-left for chained access)
+	for i := len(parts) - 2; i >= 0; i-- {
+		candidate := parts[i]
+		for _, p := range params {
+			if p.Name == candidate {
+				edges := r.resolveToImplementations(call.CallerID, methodName, p.Type)
+				if len(edges) > 0 {
+					return edges
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// resolveToImplementations creates call edges from a caller to all implementations
+// of the given interface type's method.
+func (r *CallResolver) resolveToImplementations(callerID, methodName, interfaceType string) []CallsEdge {
 	implTypes, ok := r.implementsIndex[interfaceType]
 	if !ok {
 		return nil
 	}
 
-	// Create call edges to each implementation
 	var edges []CallsEdge
 	for _, implType := range implTypes {
 		qualifiedName := implType + "." + methodName
 		if calleeID, ok := r.qualifiedFunctions[qualifiedName]; ok {
 			edges = append(edges, CallsEdge{
-				CallerID: call.CallerID,
+				CallerID: callerID,
 				CalleeID: calleeID,
 			})
 		}
 	}
-
 	return edges
 }
 

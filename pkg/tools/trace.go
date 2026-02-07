@@ -23,6 +23,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/kraklabs/cie/pkg/sigparse"
 )
 
 // TraceFuncInfo holds function metadata for call path tracing
@@ -39,12 +41,19 @@ type TracePathArgs struct {
 	PathPattern string
 	MaxPaths    int
 	MaxDepth    int
+	Waypoints   []string // Intermediate functions the path must pass through, in order
 }
 
-// TracePath traces call paths from source function(s) to a target function
+// TracePath traces call paths from source function(s) to a target function.
+// If waypoints are specified, chains BFS segments through each waypoint in order.
 func TracePath(ctx context.Context, client Querier, args TracePathArgs) (*ToolResult, error) {
 	if args.Target == "" {
 		return NewError("Error: 'target' function name is required"), nil
+	}
+
+	// If waypoints are provided, use segmented tracing
+	if len(args.Waypoints) > 0 {
+		return traceWithWaypoints(ctx, client, args)
 	}
 
 	// Find source and target functions
@@ -71,9 +80,107 @@ func TracePath(ctx context.Context, client Querier, args TracePathArgs) (*ToolRe
 
 	// Format and return output
 	if len(searchResult.paths) == 0 {
+		// Detect interface boundary at the last function in the deepest path
+		if len(searchResult.deepestPath) > 0 {
+			lastFn := searchResult.deepestPath[len(searchResult.deepestPath)-1]
+			searchResult.interfaceBoundary = detectInterfaceBoundary(ctx, client, lastFn.Name)
+		}
 		return NewResult(formatTraceNotFound(sources, args, searchResult)), nil
 	}
 	return NewResult(formatTraceOutput(sources, args, searchResult)), nil
+}
+
+// traceWithWaypoints chains BFS segments through waypoints: source → wp1 → wp2 → ... → target.
+// Each segment uses the same args for MaxDepth and PathPattern.
+func traceWithWaypoints(ctx context.Context, client Querier, args TracePathArgs) (*ToolResult, error) {
+	// Build ordered list of stops: [source, wp1, wp2, ..., target]
+	stops := make([]string, 0, len(args.Waypoints)+2)
+	if args.Source != "" {
+		stops = append(stops, args.Source)
+	}
+	stops = append(stops, args.Waypoints...)
+	stops = append(stops, args.Target)
+
+	var fullPath []TraceFuncInfo
+	totalNodes := 0
+
+	for i := 0; i < len(stops)-1; i++ {
+		segSource := stops[i]
+		segTarget := stops[i+1]
+
+		segArgs := TracePathArgs{
+			Target:      segTarget,
+			Source:       segSource,
+			PathPattern: args.PathPattern,
+			MaxPaths:    1, // Only need one path per segment
+			MaxDepth:    args.MaxDepth,
+		}
+
+		// Find source functions for this segment
+		sources := findFunctionsByName(ctx, client, segSource, args.PathPattern)
+		if len(sources) == 0 {
+			if i == 0 && args.Source == "" {
+				sources = detectEntryPoints(ctx, client, args.PathPattern)
+			}
+			if len(sources) == 0 {
+				return NewResult(fmt.Sprintf("Waypoint segment failed: function '%s' not found (segment %d: %s → %s).",
+					segSource, i+1, segSource, segTarget)), nil
+			}
+		}
+
+		targets := findFunctionsByName(ctx, client, segTarget, args.PathPattern)
+		if len(targets) == 0 {
+			return NewResult(fmt.Sprintf("Waypoint segment failed: function '%s' not found (segment %d: %s → %s).",
+				segTarget, i+1, segSource, segTarget)), nil
+		}
+
+		targetSet := make(map[string]bool)
+		for _, t := range targets {
+			targetSet[t.Name] = true
+		}
+
+		segResult := runTraceSearch(ctx, client, sources, targetSet, segArgs)
+		totalNodes += segResult.nodesExplored
+
+		if segResult.canceled {
+			return NewResult(fmt.Sprintf("Search canceled during segment %d (%s → %s).",
+				i+1, segSource, segTarget)), nil
+		}
+
+		if len(segResult.paths) == 0 {
+			return NewResult(fmt.Sprintf("No path found for segment %d: %s → %s (explored %d nodes).\n\n"+
+				"The waypoint chain broke at this segment. Try:\n"+
+				"- Verify both functions exist with `cie_find_function`\n"+
+				"- Increase `max_depth` if the functions are far apart\n"+
+				"- Check that a call path exists between these functions\n",
+				i+1, segSource, segTarget, segResult.nodesExplored)), nil
+		}
+
+		// Concatenate segment path (skip first node for subsequent segments to avoid duplicates)
+		segPath := segResult.paths[0]
+		if i > 0 && len(segPath) > 0 {
+			segPath = segPath[1:] // skip junction node (already in fullPath)
+		}
+		fullPath = append(fullPath, segPath...)
+	}
+
+	// Format output
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "## Call Path to `%s` (via %d waypoint(s))\n\n", args.Target, len(args.Waypoints))
+	fmt.Fprintf(&sb, "_Explored %d total nodes across %d segment(s)._\n\n", totalNodes, len(stops)-1)
+	sb.WriteString("```\n")
+	for i, fn := range fullPath {
+		indent := strings.Repeat("  ", i)
+		arrow := ""
+		if i > 0 {
+			arrow = "→ "
+		}
+		fmt.Fprintf(&sb, "%s%s%s\n", indent, arrow, fn.Name)
+		fmt.Fprintf(&sb, "%s   %s:%s\n", indent, ExtractFileName(fn.FilePath), fn.Line)
+	}
+	sb.WriteString("```\n")
+
+	return NewResult(sb.String()), nil
 }
 
 // getTraceSources finds source functions for tracing.
@@ -92,13 +199,20 @@ func getTraceSources(ctx context.Context, client Querier, args TracePathArgs) ([
 	return sources, nil
 }
 
+// interfaceBoundaryInfo describes where a trace stopped at an interface boundary.
+type interfaceBoundaryInfo struct {
+	FunctionName   string   // The function where the trace stopped
+	InterfaceNames []string // Interface types found (fields or params)
+}
+
 // traceSearchResult holds the result of a trace search.
 type traceSearchResult struct {
-	paths         [][]TraceFuncInfo
-	nodesExplored int
-	limitReached  bool
-	canceled      bool
-	deepestPath   []TraceFuncInfo // longest partial path explored (when no full path found)
+	paths              [][]TraceFuncInfo
+	nodesExplored      int
+	limitReached       bool
+	canceled           bool
+	deepestPath        []TraceFuncInfo      // longest partial path explored (when no full path found)
+	interfaceBoundary  *interfaceBoundaryInfo // detected interface boundary (when no full path found)
 }
 
 // pathNode represents a node in the BFS traversal.
@@ -222,7 +336,19 @@ func formatTraceNotFound(sources []TraceFuncInfo, args TracePathArgs, result tra
 			fmt.Fprintf(&sb, "%s   %s:%s\n", indent, ExtractFileName(fn.FilePath), fn.Line)
 		}
 		lastFn := result.deepestPath[len(result.deepestPath)-1]
-		fmt.Fprintf(&sb, "```\n_Chain stopped at `%s` — no outgoing calls reached the target._\n\n", lastFn.Name)
+		if result.interfaceBoundary != nil {
+			fmt.Fprintf(&sb, "```\n\n**Interface boundary detected at `%s`:**\n", lastFn.Name)
+			for _, iface := range result.interfaceBoundary.InterfaceNames {
+				fmt.Fprintf(&sb, "  - Calls through `%s` interface (not resolved as call edge)\n", iface)
+			}
+			sb.WriteString("\n**Suggested next steps:**\n")
+			for _, iface := range result.interfaceBoundary.InterfaceNames {
+				fmt.Fprintf(&sb, "- Run `cie_find_implementations(\"%s\")` to discover concrete types\n", iface)
+			}
+			sb.WriteString("- Re-index with `cie index --full` to generate interface dispatch edges\n\n")
+		} else {
+			fmt.Fprintf(&sb, "```\n_Chain stopped at `%s` — no outgoing calls reached the target._\n\n", lastFn.Name)
+		}
 	}
 
 	if result.limitReached {
@@ -419,7 +545,185 @@ func getCallees(ctx context.Context, client Querier, funcName string) []TraceFun
 		}
 	}
 
+	// 3. Parameter-based interface dispatch (safety net for pre-fix indexes)
+	// For standalone functions or methods where field dispatch found nothing extra,
+	// query the function's signature, parse params, and resolve interface types.
+	if structName == "" || len(ret) == 0 {
+		paramCallees := getCalleesViaParams(ctx, client, funcName, seen)
+		ret = append(ret, paramCallees...)
+	}
+
 	return ret
+}
+
+// getCalleesViaParams resolves interface dispatch through function parameters.
+// Queries the function's signature, parses parameter types, and for each interface-typed
+// parameter, finds concrete implementations and their methods.
+func getCalleesViaParams(ctx context.Context, client Querier, funcName string, seen map[string]bool) []TraceFuncInfo {
+	// Query the function's signature
+	sigScript := fmt.Sprintf(
+		`?[signature] := *cie_function { name, signature }, (name = %q or ends_with(name, %q)) :limit 1`,
+		funcName, "."+funcName,
+	)
+	sigResult, err := client.Query(ctx, sigScript)
+	if err != nil || len(sigResult.Rows) == 0 {
+		return nil
+	}
+
+	sig := AnyToString(sigResult.Rows[0][0])
+	if sig == "" {
+		return nil
+	}
+
+	params := sigparse.ParseGoParams(sig)
+	if len(params) == 0 {
+		return nil
+	}
+
+	// For each param with a non-primitive type, check if it's an interface
+	var ret []TraceFuncInfo
+	for _, p := range params {
+		if isPrimitiveType(p.Type) {
+			continue
+		}
+
+		// Query implementations of this type
+		implScript := fmt.Sprintf(
+			`?[callee_name, callee_file, callee_line] :=
+				*cie_implements { interface_name, type_name: impl_type },
+				(interface_name = %q or ends_with(interface_name, %q)),
+				impl_prefix = concat(impl_type, "."),
+				*cie_function { name: callee_name, file_path: callee_file, start_line: callee_line },
+				starts_with(callee_name, impl_prefix)
+			:limit 50`,
+			p.Type, "."+p.Type,
+		)
+
+		implResult, err := client.Query(ctx, implScript)
+		if err != nil || len(implResult.Rows) == 0 {
+			continue
+		}
+
+		for _, row := range implResult.Rows {
+			name := AnyToString(row[0])
+			if !seen[name] {
+				seen[name] = true
+				ret = append(ret, TraceFuncInfo{
+					Name:     name,
+					FilePath: AnyToString(row[1]),
+					Line:     AnyToString(row[2]),
+				})
+			}
+		}
+	}
+
+	return ret
+}
+
+// isPrimitiveType returns true for Go built-in types that can never be interfaces.
+func isPrimitiveType(t string) bool {
+	switch t {
+	case "string", "int", "int8", "int16", "int32", "int64",
+		"uint", "uint8", "uint16", "uint32", "uint64",
+		"float32", "float64", "complex64", "complex128",
+		"bool", "byte", "rune", "error", "func",
+		"Context": // context.Context is common but not user-defined
+		return true
+	}
+	return false
+}
+
+// detectInterfaceBoundary checks whether a function sits at an interface boundary.
+// For methods: queries the struct's fields for interface types.
+// For standalone functions: queries the signature for interface-typed params.
+// Returns nil if no interface boundary is detected.
+func detectInterfaceBoundary(ctx context.Context, client Querier, funcName string) *interfaceBoundaryInfo {
+	var interfaceNames []string
+
+	if structName := extractStructName(funcName); structName != "" {
+		interfaceNames = append(interfaceNames, detectFieldInterfaces(ctx, client, structName)...)
+	}
+
+	interfaceNames = appendUniqueStrings(interfaceNames, detectParamInterfaces(ctx, client, funcName)...)
+
+	if len(interfaceNames) == 0 {
+		return nil
+	}
+
+	return &interfaceBoundaryInfo{
+		FunctionName:   funcName,
+		InterfaceNames: interfaceNames,
+	}
+}
+
+// detectFieldInterfaces queries struct fields and returns those whose types are known interfaces.
+func detectFieldInterfaces(ctx context.Context, client Querier, structName string) []string {
+	fieldScript := fmt.Sprintf(
+		`?[field_type] :=
+			*cie_field { struct_name: %q, field_type },
+			*cie_implements { interface_name },
+			(field_type = interface_name or ends_with(field_type, concat(".", interface_name)))
+		:limit 10`,
+		structName,
+	)
+	fieldResult, err := client.Query(ctx, fieldScript)
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, row := range fieldResult.Rows {
+		names = append(names, AnyToString(row[0]))
+	}
+	return names
+}
+
+// detectParamInterfaces queries a function's signature and returns parameter types that are known interfaces.
+func detectParamInterfaces(ctx context.Context, client Querier, funcName string) []string {
+	sigScript := fmt.Sprintf(
+		`?[signature] := *cie_function { name, signature }, (name = %q or ends_with(name, %q)) :limit 1`,
+		funcName, "."+funcName,
+	)
+	sigResult, err := client.Query(ctx, sigScript)
+	if err != nil || len(sigResult.Rows) == 0 {
+		return nil
+	}
+	sig := AnyToString(sigResult.Rows[0][0])
+	if sig == "" {
+		return nil
+	}
+
+	var names []string
+	for _, p := range sigparse.ParseGoParams(sig) {
+		if isPrimitiveType(p.Type) {
+			continue
+		}
+		implScript := fmt.Sprintf(
+			`?[interface_name] := *cie_implements { interface_name }, (interface_name = %q or ends_with(interface_name, %q)) :limit 1`,
+			p.Type, "."+p.Type,
+		)
+		implResult, err := client.Query(ctx, implScript)
+		if err == nil && len(implResult.Rows) > 0 {
+			names = append(names, AnyToString(implResult.Rows[0][0]))
+		}
+	}
+	return names
+}
+
+// appendUniqueStrings appends values from src to dst, skipping duplicates.
+func appendUniqueStrings(dst []string, src ...string) []string {
+	for _, s := range src {
+		found := false
+		for _, existing := range dst {
+			if existing == s {
+				found = true
+				break
+			}
+		}
+		if !found {
+			dst = append(dst, s)
+		}
+	}
+	return dst
 }
 
 // extractStructName extracts the struct name from a qualified method name.

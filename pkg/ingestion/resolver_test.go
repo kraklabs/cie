@@ -464,6 +464,117 @@ func TestCallResolver_ResolveInterfaceFieldCall_DeeplyChained(t *testing.T) {
 	}
 }
 
+func TestCallResolver_ResolveInterfaceCall_StandaloneFunction(t *testing.T) {
+	// Standalone function `storeFact(client Querier, fact string)` calls client.StoreFact
+	// No struct, no fields — resolution must go through signature params.
+
+	files := []FileEntity{
+		{ID: "file:tools.go", Path: "pkg/tools/tools.go", Language: "go"},
+	}
+	functions := []FunctionEntity{
+		{
+			ID:        "fn:storeFact",
+			Name:      "storeFact",
+			FilePath:  "pkg/tools/tools.go",
+			Signature: "func storeFact(client Querier, fact string) error",
+		},
+		{ID: "fn:CIEClient.StoreFact", Name: "CIEClient.StoreFact", FilePath: "pkg/tools/client.go"},
+		{ID: "fn:EmbeddedQuerier.StoreFact", Name: "EmbeddedQuerier.StoreFact", FilePath: "pkg/tools/embedded.go"},
+	}
+	imports := []ImportEntity{}
+	packageNames := map[string]string{
+		"pkg/tools/tools.go": "tools",
+	}
+
+	fields := []FieldEntity{} // No fields — standalone function
+	implements := []ImplementsEdge{
+		{TypeName: "CIEClient", InterfaceName: "Querier"},
+		{TypeName: "EmbeddedQuerier", InterfaceName: "Querier"},
+	}
+
+	unresolvedCalls := []UnresolvedCall{
+		{
+			CallerID:   "fn:storeFact",
+			CalleeName: "client.StoreFact",
+			FilePath:   "pkg/tools/tools.go",
+			Line:       10,
+		},
+	}
+
+	resolver := NewCallResolver()
+	resolver.BuildIndex(files, functions, imports, packageNames)
+	resolver.SetInterfaceIndex(fields, implements)
+
+	resolvedCalls := resolver.ResolveCalls(unresolvedCalls)
+
+	if len(resolvedCalls) != 2 {
+		t.Fatalf("expected 2 resolved calls via param dispatch, got %d", len(resolvedCalls))
+	}
+
+	calleeIDs := map[string]bool{}
+	for _, call := range resolvedCalls {
+		calleeIDs[call.CalleeID] = true
+	}
+	if !calleeIDs["fn:CIEClient.StoreFact"] {
+		t.Error("expected callee fn:CIEClient.StoreFact")
+	}
+	if !calleeIDs["fn:EmbeddedQuerier.StoreFact"] {
+		t.Error("expected callee fn:EmbeddedQuerier.StoreFact")
+	}
+}
+
+func TestCallResolver_ResolveInterfaceCall_MethodFallbackToParams(t *testing.T) {
+	// Method `Server.Run(q Querier)` calls q.Execute — "q" is a param, not a field.
+	// Field-based lookup should fail (no field named "q"), then param-based should succeed.
+
+	files := []FileEntity{
+		{ID: "file:server.go", Path: "pkg/server.go", Language: "go"},
+	}
+	functions := []FunctionEntity{
+		{
+			ID:        "fn:Server.Run",
+			Name:      "Server.Run",
+			FilePath:  "pkg/server.go",
+			Signature: "func (s *Server) Run(q Querier) error",
+		},
+		{ID: "fn:LocalRunner.Execute", Name: "LocalRunner.Execute", FilePath: "pkg/runner.go"},
+	}
+	imports := []ImportEntity{}
+	packageNames := map[string]string{
+		"pkg/server.go": "pkg",
+	}
+
+	// Server has no field named "q"
+	fields := []FieldEntity{
+		{StructName: "Server", FieldName: "name", FieldType: "string"},
+	}
+	implements := []ImplementsEdge{
+		{TypeName: "LocalRunner", InterfaceName: "Querier"},
+	}
+
+	unresolvedCalls := []UnresolvedCall{
+		{
+			CallerID:   "fn:Server.Run",
+			CalleeName: "q.Execute",
+			FilePath:   "pkg/server.go",
+			Line:       15,
+		},
+	}
+
+	resolver := NewCallResolver()
+	resolver.BuildIndex(files, functions, imports, packageNames)
+	resolver.SetInterfaceIndex(fields, implements)
+
+	resolvedCalls := resolver.ResolveCalls(unresolvedCalls)
+
+	if len(resolvedCalls) != 1 {
+		t.Fatalf("expected 1 resolved call via param fallback, got %d", len(resolvedCalls))
+	}
+	if resolvedCalls[0].CalleeID != "fn:LocalRunner.Execute" {
+		t.Errorf("expected callee fn:LocalRunner.Execute, got %s", resolvedCalls[0].CalleeID)
+	}
+}
+
 func TestCallResolver_NoDuplicates(t *testing.T) {
 	// Ensure no duplicate edges are created
 
