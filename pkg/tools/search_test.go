@@ -20,7 +20,9 @@
 package tools
 
 import (
+	"context"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -582,4 +584,171 @@ func TestFindFunction_QueryError(t *testing.T) {
 	}
 	assertContains(t, result.Text, "Query error")
 	assertContains(t, result.Text, "Generated query")
+}
+
+// Test FindFunction case-insensitive matching uses regex
+func TestFindFunction_CaseInsensitive(t *testing.T) {
+	var capturedScript string
+	client := NewMockClientCustom(
+		func(ctx context.Context, script string) (*QueryResult, error) {
+			capturedScript = script
+			return &QueryResult{
+				Headers: []string{"file_path", "name", "signature", "start_line", "end_line"},
+				Rows:    [][]any{{"pkg/db.go", "CozoDB.runQuery", "func (c *CozoDB) runQuery()", 42, 60}},
+			}, nil
+		},
+		nil,
+	)
+	ctx := setupTest(t)
+
+	result, err := FindFunction(ctx, client, FindFunctionArgs{Name: "runQuery", ExactMatch: false})
+	assertNoError(t, err)
+
+	if result.IsError {
+		t.Errorf("unexpected error: %s", result.Text)
+	}
+	// The query should use case-insensitive regex
+	assertContains(t, capturedScript, "regex_matches")
+	assertContains(t, capturedScript, "(?i)")
+	assertContains(t, result.Text, "CozoDB.runQuery")
+}
+
+// Test FindFunction exact match still uses direct comparison
+func TestFindFunction_ExactMatchStillExact(t *testing.T) {
+	var capturedScript string
+	client := NewMockClientCustom(
+		func(ctx context.Context, script string) (*QueryResult, error) {
+			capturedScript = script
+			return &QueryResult{
+				Headers: []string{"file_path", "name", "signature", "start_line", "end_line"},
+				Rows:    [][]any{{"pkg/db.go", "RunQuery", "func RunQuery()", 10, 20}},
+			}, nil
+		},
+		nil,
+	)
+	ctx := setupTest(t)
+
+	_, err := FindFunction(ctx, client, FindFunctionArgs{Name: "RunQuery", ExactMatch: true})
+	assertNoError(t, err)
+
+	// Exact match should use name = "...", not regex
+	if !strings.Contains(capturedScript, "name = ") {
+		t.Error("exact_match=true should use direct name comparison")
+	}
+}
+
+// Test FindBySignature with param type
+func TestFindBySignature_ParamType(t *testing.T) {
+	client := NewMockClientWithResults(
+		[]string{"name", "file_path", "signature", "start_line"},
+		[][]any{
+			{"Writer.StoreFact", "pkg/tools/writer.go", "func (w *Writer) StoreFact(backend storage.Backend, fact string) error", 45},
+			{"ProcessBatch", "pkg/ingestion/batch.go", "func ProcessBatch(b *storage.Backend, items []Item) error", 23},
+		},
+	)
+	ctx := setupTest(t)
+
+	result, err := FindBySignature(ctx, client, FindBySignatureArgs{
+		ParamType: "Backend",
+		Limit:     20,
+	})
+	assertNoError(t, err)
+
+	if result.IsError {
+		t.Errorf("unexpected error: %s", result.Text)
+	}
+	assertContains(t, result.Text, "parameter type `Backend`")
+	assertContains(t, result.Text, "Writer.StoreFact")
+	assertContains(t, result.Text, "ProcessBatch")
+}
+
+// Test FindBySignature with return type
+func TestFindBySignature_ReturnType(t *testing.T) {
+	client := NewMockClientWithResults(
+		[]string{"name", "file_path", "signature", "start_line"},
+		[][]any{
+			{"NewClient", "pkg/client.go", "func NewClient(url string) *Client", 10},
+		},
+	)
+	ctx := setupTest(t)
+
+	result, err := FindBySignature(ctx, client, FindBySignatureArgs{
+		ReturnType: "Client",
+		Limit:      20,
+	})
+	assertNoError(t, err)
+
+	if result.IsError {
+		t.Errorf("unexpected error: %s", result.Text)
+	}
+	assertContains(t, result.Text, "return type `Client`")
+	assertContains(t, result.Text, "NewClient")
+}
+
+// Test FindBySignature with no results
+func TestFindBySignature_NoResults(t *testing.T) {
+	client := NewMockClientEmpty()
+	ctx := setupTest(t)
+
+	result, err := FindBySignature(ctx, client, FindBySignatureArgs{
+		ParamType: "NonExistentType",
+		Limit:     20,
+	})
+	assertNoError(t, err)
+
+	assertContains(t, result.Text, "No matching functions found")
+}
+
+// Test FindBySignature requires at least one filter
+func TestFindBySignature_RequiresFilter(t *testing.T) {
+	ctx := setupTest(t)
+
+	result, err := FindBySignature(ctx, nil, FindBySignatureArgs{})
+	assertNoError(t, err)
+
+	if !result.IsError {
+		t.Error("expected error when both param_type and return_type are empty")
+	}
+	assertContains(t, result.Text, "required")
+}
+
+// Test extractReturnPart helper
+func TestExtractReturnPart(t *testing.T) {
+	tests := []struct {
+		sig  string
+		want string
+	}{
+		{"func Foo() error", "error"},
+		{"func (s *Server) Run(ctx Context) error", "error"},
+		{"func NewClient(url string) *Client", "*Client"},
+		{"func Process(x int) (int, error)", "(int, error)"},
+		{"func NoReturn()", ""},
+	}
+
+	for _, tt := range tests {
+		got := extractReturnPart(tt.sig)
+		if got != tt.want {
+			t.Errorf("extractReturnPart(%q) = %q, want %q", tt.sig, got, tt.want)
+		}
+	}
+}
+
+// Test containsCaseInsensitive helper
+func TestContainsCaseInsensitive(t *testing.T) {
+	tests := []struct {
+		s, substr string
+		want      bool
+	}{
+		{"Hello World", "hello", true},
+		{"func() error", "Error", true},
+		{"*Client", "client", true},
+		{"nothing", "xyz", false},
+	}
+
+	for _, tt := range tests {
+		got := containsCaseInsensitive(tt.s, tt.substr)
+		if got != tt.want {
+			t.Errorf("containsCaseInsensitive(%q, %q) = %v, want %v", tt.s, tt.substr, got, tt.want)
+		}
+	}
 }

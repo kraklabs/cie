@@ -64,10 +64,10 @@ func createMockCallGraph(functions map[string]TraceFuncInfo, callGraph map[strin
 	return NewMockClientCustom(
 		func(ctx context.Context, script string) (*QueryResult, error) {
 			// Detect query type by script content
+
+			// 1. getCallees query (cie_calls table)
 			if strings.Contains(script, "cie_calls") && strings.Contains(script, "caller_id") {
-				// getCallees query - extract function name from script
 				for funcName, callees := range callGraph {
-					// Match either exact name or suffix pattern
 					quotedName := fmt.Sprintf("%q", funcName)
 					quotedSuffix := fmt.Sprintf("%q", "."+funcName)
 					if strings.Contains(script, quotedName) || strings.Contains(script, quotedSuffix) {
@@ -81,39 +81,47 @@ func createMockCallGraph(functions map[string]TraceFuncInfo, callGraph map[strin
 					}
 				}
 				return mockTraceCalleesResult(), nil
-			} else if strings.Contains(script, "name =") || strings.Contains(script, "ends_with") {
-				// findFunctionsByName query - looks for exact match or suffix match
-				// Extract the function name being searched
+			}
+
+			// 2. Function lookup queries (findFunctionsByName uses regex_matches with (?i))
+			//    Also matches old-style name= queries for backward compat
+			if strings.Contains(script, "cie_function") && !strings.Contains(script, "cie_calls") {
+				// Check if this is an entry point detection query (has language file patterns)
+				isEntryPointQuery := strings.Contains(script, "[.]go$") ||
+					strings.Contains(script, "[.]rs$") ||
+					strings.Contains(script, "[.]py$") ||
+					strings.Contains(script, "(index|app|server|main)")
+
+				if isEntryPointQuery {
+					var matches []TraceFuncInfo
+					for name, fn := range functions {
+						isMain := name == "main" || name == "__main__"
+						isGoFile := strings.HasSuffix(fn.FilePath, ".go")
+						isPyFile := strings.HasSuffix(fn.FilePath, ".py")
+						isJsFile := strings.HasSuffix(fn.FilePath, ".js") || strings.HasSuffix(fn.FilePath, ".ts")
+
+						if isMain && (isGoFile || isPyFile) {
+							matches = append(matches, fn)
+						} else if isJsFile && (strings.Contains(fn.FilePath, "index") ||
+							strings.Contains(fn.FilePath, "app") || strings.Contains(fn.FilePath, "server")) {
+							matches = append(matches, fn)
+						}
+					}
+					return mockTraceFunctionResult(matches...), nil
+				}
+
+				// Regular function lookup — match by escaped name in query
 				var matches []TraceFuncInfo
 				for funcName, fn := range functions {
-					quotedName := fmt.Sprintf("%q", funcName)
-					quotedSuffix := fmt.Sprintf("%q", "."+funcName)
-					// Check if this function matches the query
-					if strings.Contains(script, quotedName) || strings.Contains(script, quotedSuffix) {
-						matches = append(matches, fn)
-					}
-				}
-				return mockTraceFunctionResult(matches...), nil
-			} else if strings.Contains(script, "regex_matches") {
-				// detectEntryPoints query - pattern-based matching
-				var matches []TraceFuncInfo
-				for name, fn := range functions {
-					// Check various entry point patterns
-					isMain := name == "main" || name == "__main__"
-					isGoFile := strings.HasSuffix(fn.FilePath, ".go")
-					isPyFile := strings.HasSuffix(fn.FilePath, ".py")
-					isJsFile := strings.HasSuffix(fn.FilePath, ".js") || strings.HasSuffix(fn.FilePath, ".ts")
-
-					// Match based on language patterns
-					if isMain && (isGoFile || isPyFile) {
-						matches = append(matches, fn)
-					} else if isJsFile && (strings.Contains(fn.FilePath, "index") ||
-						strings.Contains(fn.FilePath, "app") || strings.Contains(fn.FilePath, "server")) {
+					// The query contains the escaped function name (e.g., "funcA" or ".funcA")
+					escapedName := EscapeRegex(funcName)
+					if strings.Contains(script, escapedName) {
 						matches = append(matches, fn)
 					}
 				}
 				return mockTraceFunctionResult(matches...), nil
 			}
+
 			return &QueryResult{Headers: []string{}, Rows: [][]any{}}, nil
 		},
 		nil,
@@ -1139,6 +1147,154 @@ func TestExtractStructName(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("extractStructName(%q) = %q, want %q", tt.input, got, tt.want)
 		}
+	}
+}
+
+// Test findFunctionSuggestions returns similar function names
+func TestFindFunctionSuggestions(t *testing.T) {
+	client := NewMockClientWithResults(
+		[]string{"name", "file_path", "start_line"},
+		[][]any{
+			{"Server.HandleCall", "pkg/mcp/server.go", 45},
+			{"httpHandler", "cmd/main.go", 23},
+			{"HandleAuth", "internal/auth/auth.go", 12},
+		},
+	)
+	ctx := context.Background()
+
+	suggestions := findFunctionSuggestions(ctx, client, "Handle", "", 5)
+
+	if len(suggestions) != 3 {
+		t.Fatalf("findFunctionSuggestions() returned %d, want 3", len(suggestions))
+	}
+	if suggestions[0].Name != "Server.HandleCall" {
+		t.Errorf("first suggestion = %q, want Server.HandleCall", suggestions[0].Name)
+	}
+}
+
+// Test findFunctionSuggestions returns empty when nothing matches
+func TestFindFunctionSuggestions_NoMatch(t *testing.T) {
+	client := NewMockClientEmpty()
+	ctx := context.Background()
+
+	suggestions := findFunctionSuggestions(ctx, client, "XyzNotExist", "", 5)
+
+	if len(suggestions) != 0 {
+		t.Errorf("findFunctionSuggestions() returned %d, want 0", len(suggestions))
+	}
+}
+
+// Test formatSuggestions output format
+func TestFormatSuggestions(t *testing.T) {
+	suggestions := []TraceFuncInfo{
+		{Name: "Server.HandleCall", FilePath: "pkg/mcp/server.go", Line: "45"},
+		{Name: "HandleAuth", FilePath: "internal/auth/auth.go", Line: "12"},
+	}
+
+	output := formatSuggestions(suggestions)
+
+	if !strings.Contains(output, "Did you mean?") {
+		t.Error("formatSuggestions() should contain 'Did you mean?'")
+	}
+	if !strings.Contains(output, "Server.HandleCall") {
+		t.Error("formatSuggestions() should contain suggestion name")
+	}
+	if !strings.Contains(output, "pkg/mcp/server.go:45") {
+		t.Error("formatSuggestions() should contain file:line")
+	}
+}
+
+// Test formatSuggestions with empty list
+func TestFormatSuggestions_Empty(t *testing.T) {
+	output := formatSuggestions(nil)
+	if output != "" {
+		t.Errorf("formatSuggestions(nil) = %q, want empty", output)
+	}
+}
+
+// Test TracePath target not found includes suggestions
+func TestTracePath_TargetNotFound_WithSuggestions(t *testing.T) {
+	queryCount := 0
+	client := NewMockClientCustom(
+		func(ctx context.Context, script string) (*QueryResult, error) {
+			queryCount++
+			// First query: source lookup (finds "main")
+			if queryCount == 1 {
+				return &QueryResult{
+					Headers: []string{"name", "file_path", "start_line"},
+					Rows:    [][]any{{"main", "cmd/main.go", 1}},
+				}, nil
+			}
+			// Second query: target lookup (not found)
+			if queryCount == 2 {
+				return &QueryResult{
+					Headers: []string{"name", "file_path", "start_line"},
+					Rows:    [][]any{},
+				}, nil
+			}
+			// Third query: suggestions
+			if queryCount == 3 {
+				return &QueryResult{
+					Headers: []string{"name", "file_path", "start_line"},
+					Rows: [][]any{
+						{"Server.HandleCall", "pkg/mcp/server.go", 45},
+						{"HandleAuth", "internal/auth/auth.go", 12},
+					},
+				}, nil
+			}
+			return &QueryResult{Headers: []string{}, Rows: [][]any{}}, nil
+		},
+		nil,
+	)
+	ctx := context.Background()
+
+	result, err := TracePath(ctx, client, TracePathArgs{
+		Target:   "Handle",
+		Source:   "main",
+		MaxPaths: 3,
+		MaxDepth: 10,
+	})
+	if err != nil {
+		t.Fatalf("TracePath() error = %v", err)
+	}
+
+	if !strings.Contains(result.Text, "not found") {
+		t.Error("should contain 'not found'")
+	}
+	if !strings.Contains(result.Text, "Did you mean?") {
+		t.Error("should contain 'Did you mean?'")
+	}
+	if !strings.Contains(result.Text, "Server.HandleCall") {
+		t.Error("should contain suggestion")
+	}
+}
+
+// Test that findFunctionsByName now uses case-insensitive matching
+// The mock verifies the query contains regex_matches with (?i) pattern
+func TestFindFunctionsByName_CaseInsensitive(t *testing.T) {
+	var capturedScript string
+	client := NewMockClientCustom(
+		func(ctx context.Context, script string) (*QueryResult, error) {
+			capturedScript = script
+			return &QueryResult{
+				Headers: []string{"name", "file_path", "start_line"},
+				Rows:    [][]any{{"CozoDB.runQuery", "pkg/db.go", 42}},
+			}, nil
+		},
+		nil,
+	)
+	ctx := context.Background()
+
+	funcs := findFunctionsByName(ctx, client, "runQuery", "")
+
+	if len(funcs) != 1 {
+		t.Fatalf("findFunctionsByName() returned %d, want 1", len(funcs))
+	}
+	if !strings.Contains(capturedScript, "regex_matches") {
+		t.Error("query should use regex_matches for case-insensitive matching")
+	}
+	if !strings.Contains(capturedScript, "(?i)") {
+		t.Error("query should contain (?i) for case-insensitive flag")
 	}
 }
 
