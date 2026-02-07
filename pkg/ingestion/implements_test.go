@@ -100,6 +100,78 @@ func TestBuildImplementsIndex_EmptyInterface(t *testing.T) {
 	assert.Len(t, edges, 0, "Empty interface should not produce edges")
 }
 
+func TestBuildImplementsIndex_EmbeddedInterface(t *testing.T) {
+	types := []TypeEntity{
+		{
+			Name:     "Reader",
+			Kind:     "interface",
+			CodeText: "Reader interface {\n\tRead(p []byte) (int, error)\n}",
+		},
+		{
+			Name:     "Writer",
+			Kind:     "interface",
+			CodeText: "Writer interface {\n\tWrite(p []byte) (int, error)\n}",
+		},
+		{
+			Name: "ReadWriter",
+			Kind: "interface",
+			CodeText: "ReadWriter interface {\n\tReader\n\tWriter\n\tFlush() error\n}",
+		},
+	}
+	functions := []FunctionEntity{
+		// BufferedRW implements all three methods: Read, Write, Flush
+		{Name: "BufferedRW.Read", FilePath: "io/buf.go"},
+		{Name: "BufferedRW.Write", FilePath: "io/buf.go"},
+		{Name: "BufferedRW.Flush", FilePath: "io/buf.go"},
+		// SimpleWriter only has Write
+		{Name: "SimpleWriter.Write", FilePath: "io/simple.go"},
+	}
+
+	edges := BuildImplementsIndex(types, functions)
+
+	implMap := make(map[string][]string) // interface → []type
+	for _, e := range edges {
+		implMap[e.InterfaceName] = append(implMap[e.InterfaceName], e.TypeName)
+	}
+
+	// BufferedRW should implement Reader, Writer, AND ReadWriter
+	assert.Contains(t, implMap["Reader"], "BufferedRW", "BufferedRW should implement Reader")
+	assert.Contains(t, implMap["Writer"], "BufferedRW", "BufferedRW should implement Writer")
+	assert.Contains(t, implMap["ReadWriter"], "BufferedRW", "BufferedRW should implement ReadWriter (via embedded methods)")
+
+	// SimpleWriter should implement Writer but NOT ReadWriter (missing Read and Flush)
+	assert.Contains(t, implMap["Writer"], "SimpleWriter", "SimpleWriter should implement Writer")
+	assert.NotContains(t, implMap["ReadWriter"], "SimpleWriter", "SimpleWriter should NOT implement ReadWriter")
+}
+
+func TestBuildImplementsIndex_EmbeddedInterface_StdlibFallback(t *testing.T) {
+	// Test that embedding io.Stringer falls back to the stdlib map
+	types := []TypeEntity{
+		{
+			Name: "Named",
+			Kind: "interface",
+			CodeText: "Named interface {\n\tfmt.Stringer\n\tName() string\n}",
+		},
+	}
+	functions := []FunctionEntity{
+		// MyType has both String() and Name()
+		{Name: "MyType.String", FilePath: "pkg/types.go"},
+		{Name: "MyType.Name", FilePath: "pkg/types.go"},
+		// PartialType only has Name()
+		{Name: "PartialType.Name", FilePath: "pkg/types.go"},
+	}
+
+	edges := BuildImplementsIndex(types, functions)
+
+	implMap := make(map[string]bool)
+	for _, e := range edges {
+		implMap[e.TypeName] = true
+	}
+
+	assert.True(t, implMap["MyType"], "MyType should implement Named (has String+Name)")
+	assert.False(t, implMap["PartialType"], "PartialType should NOT implement Named (missing String)")
+}
+
 func TestBuildImplementsIndex_MultipleInterfaces(t *testing.T) {
 	types := []TypeEntity{
 		{

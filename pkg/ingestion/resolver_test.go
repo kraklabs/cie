@@ -575,6 +575,179 @@ func TestCallResolver_ResolveInterfaceCall_MethodFallbackToParams(t *testing.T) 
 	}
 }
 
+func TestCallResolver_ResolveConcreteFieldMethodCall(t *testing.T) {
+	// Setup: EmbeddedBackend.Execute calls b.db.Run() where db is *CozoDB (concrete, not interface)
+	// CozoDB.Run is in the index as a regular function.
+
+	files := []FileEntity{
+		{ID: "file:backend.go", Path: "pkg/storage/backend.go", Language: "go"},
+		{ID: "file:cozodb.go", Path: "pkg/cozodb/cozodb.go", Language: "go"},
+	}
+	functions := []FunctionEntity{
+		{ID: "fn:EmbeddedBackend.Execute", Name: "EmbeddedBackend.Execute", FilePath: "pkg/storage/backend.go"},
+		{ID: "fn:CozoDB.Run", Name: "CozoDB.Run", FilePath: "pkg/cozodb/cozodb.go"},
+	}
+	imports := []ImportEntity{}
+	packageNames := map[string]string{
+		"pkg/storage/backend.go": "storage",
+		"pkg/cozodb/cozodb.go":   "cozodb",
+	}
+
+	fields := []FieldEntity{
+		{StructName: "EmbeddedBackend", FieldName: "db", FieldType: "CozoDB", FilePath: "pkg/storage/backend.go"},
+	}
+	implements := []ImplementsEdge{} // CozoDB is NOT an interface — no implements edges
+
+	unresolvedCalls := []UnresolvedCall{
+		{
+			CallerID:   "fn:EmbeddedBackend.Execute",
+			CalleeName: "b.db.Run",
+			FilePath:   "pkg/storage/backend.go",
+			Line:       42,
+		},
+	}
+
+	resolver := NewCallResolver()
+	resolver.BuildIndex(files, functions, imports, packageNames)
+	resolver.SetInterfaceIndex(fields, implements)
+
+	resolvedCalls := resolver.ResolveCalls(unresolvedCalls)
+
+	if len(resolvedCalls) != 1 {
+		t.Fatalf("expected 1 resolved call via concrete field dispatch, got %d", len(resolvedCalls))
+	}
+	if resolvedCalls[0].CallerID != "fn:EmbeddedBackend.Execute" {
+		t.Errorf("expected caller fn:EmbeddedBackend.Execute, got %s", resolvedCalls[0].CallerID)
+	}
+	if resolvedCalls[0].CalleeID != "fn:CozoDB.Run" {
+		t.Errorf("expected callee fn:CozoDB.Run, got %s", resolvedCalls[0].CalleeID)
+	}
+}
+
+func TestCallResolver_ResolveConcreteFieldMethodCall_ExternalStub(t *testing.T) {
+	// Setup: A struct has a field of type DB (from external package, not indexed).
+	// The resolver should generate a synthetic stub for DB.Query.
+
+	files := []FileEntity{
+		{ID: "file:repo.go", Path: "pkg/repo.go", Language: "go"},
+	}
+	functions := []FunctionEntity{
+		{ID: "fn:Repo.Save", Name: "Repo.Save", FilePath: "pkg/repo.go"},
+		// Note: NO DB.Query function in the index (it's external)
+	}
+	imports := []ImportEntity{}
+	packageNames := map[string]string{
+		"pkg/repo.go": "pkg",
+	}
+
+	fields := []FieldEntity{
+		{StructName: "Repo", FieldName: "db", FieldType: "DB", FilePath: "pkg/repo.go"},
+	}
+	implements := []ImplementsEdge{} // No implements for DB
+
+	unresolvedCalls := []UnresolvedCall{
+		{
+			CallerID:   "fn:Repo.Save",
+			CalleeName: "r.db.Query",
+			FilePath:   "pkg/repo.go",
+			Line:       15,
+		},
+	}
+
+	resolver := NewCallResolver()
+	resolver.BuildIndex(files, functions, imports, packageNames)
+	resolver.SetInterfaceIndex(fields, implements)
+
+	resolvedCalls := resolver.ResolveCalls(unresolvedCalls)
+
+	// Should produce 1 edge to a synthetic stub
+	if len(resolvedCalls) != 1 {
+		t.Fatalf("expected 1 resolved call via external stub, got %d", len(resolvedCalls))
+	}
+	if resolvedCalls[0].CallerID != "fn:Repo.Save" {
+		t.Errorf("expected caller fn:Repo.Save, got %s", resolvedCalls[0].CallerID)
+	}
+
+	// Verify stub was generated
+	stubs := resolver.StubFunctions()
+	if len(stubs) != 1 {
+		t.Fatalf("expected 1 stub function, got %d", len(stubs))
+	}
+	if stubs[0].Name != "DB.Query" {
+		t.Errorf("expected stub name DB.Query, got %s", stubs[0].Name)
+	}
+	if stubs[0].FilePath != "<external>" {
+		t.Errorf("expected stub file_path <external>, got %s", stubs[0].FilePath)
+	}
+	// Stub ID should match the callee ID in the edge
+	if resolvedCalls[0].CalleeID != stubs[0].ID {
+		t.Errorf("edge calleeID %s should match stub ID %s", resolvedCalls[0].CalleeID, stubs[0].ID)
+	}
+}
+
+func TestCallResolver_ResolveConcreteFieldMethodCall_InterfaceTakesPrecedence(t *testing.T) {
+	// When a field type IS an interface, interface dispatch should work (no regression).
+	// Writer is an interface with implementors CozoDB and FileStore.
+
+	files := []FileEntity{
+		{ID: "file:store.go", Path: "internal/store/store.go", Language: "go"},
+	}
+	functions := []FunctionEntity{
+		{ID: "fn:Builder.Build", Name: "Builder.Build", FilePath: "internal/store/store.go"},
+		{ID: "fn:CozoDB.Write", Name: "CozoDB.Write", FilePath: "internal/store/store.go"},
+		{ID: "fn:FileStore.Write", Name: "FileStore.Write", FilePath: "internal/store/store.go"},
+	}
+	imports := []ImportEntity{}
+	packageNames := map[string]string{
+		"internal/store/store.go": "store",
+	}
+
+	fields := []FieldEntity{
+		{StructName: "Builder", FieldName: "writer", FieldType: "Writer"},
+	}
+	implements := []ImplementsEdge{
+		{TypeName: "CozoDB", InterfaceName: "Writer"},
+		{TypeName: "FileStore", InterfaceName: "Writer"},
+	}
+
+	unresolvedCalls := []UnresolvedCall{
+		{
+			CallerID:   "fn:Builder.Build",
+			CalleeName: "writer.Write",
+			FilePath:   "internal/store/store.go",
+			Line:       10,
+		},
+	}
+
+	resolver := NewCallResolver()
+	resolver.BuildIndex(files, functions, imports, packageNames)
+	resolver.SetInterfaceIndex(fields, implements)
+
+	resolvedCalls := resolver.ResolveCalls(unresolvedCalls)
+
+	// Interface dispatch should produce 2 edges (CozoDB + FileStore), not 1
+	if len(resolvedCalls) != 2 {
+		t.Fatalf("expected 2 resolved calls (interface dispatch), got %d", len(resolvedCalls))
+	}
+
+	calleeIDs := map[string]bool{}
+	for _, call := range resolvedCalls {
+		calleeIDs[call.CalleeID] = true
+	}
+	if !calleeIDs["fn:CozoDB.Write"] {
+		t.Error("expected callee fn:CozoDB.Write")
+	}
+	if !calleeIDs["fn:FileStore.Write"] {
+		t.Error("expected callee fn:FileStore.Write")
+	}
+
+	// No stubs should be generated
+	stubs := resolver.StubFunctions()
+	if len(stubs) != 0 {
+		t.Errorf("expected 0 stubs when interface dispatch succeeds, got %d", len(stubs))
+	}
+}
+
 func TestCallResolver_NoDuplicates(t *testing.T) {
 	// Ensure no duplicate edges are created
 

@@ -423,6 +423,129 @@ func TestFindCallees(t *testing.T) {
 	}
 }
 
+// Test FindCallees with concrete field dispatch
+func TestFindCallees_ConcreteFieldDispatch(t *testing.T) {
+	queryCount := 0
+	client := NewMockClientCustom(
+		func(ctx context.Context, script string) (*QueryResult, error) {
+			queryCount++
+			// Phase 1: Direct callees (cie_calls)
+			if strings.Contains(script, "cie_calls") {
+				return &QueryResult{
+					Headers: []string{"caller_name", "callee_file", "callee_name", "callee_line"},
+					Rows:    [][]any{},
+				}, nil
+			}
+			// Phase 2: Interface dispatch (cie_field + cie_implements) — none
+			if strings.Contains(script, "cie_field") && strings.Contains(script, "cie_implements") {
+				return &QueryResult{
+					Headers: []string{"caller_name", "callee_file", "callee_name", "callee_line"},
+					Rows:    [][]any{},
+				}, nil
+			}
+			// Phase 2b: Concrete field dispatch (cie_field + field_prefix)
+			if strings.Contains(script, "cie_field") && strings.Contains(script, "field_prefix") {
+				return &QueryResult{
+					Headers: []string{"caller_name", "callee_file", "callee_name", "callee_line"},
+					Rows: [][]any{
+						{"EmbeddedBackend.Execute", "pkg/cozodb/cozodb.go", "CozoDB.Run", 42},
+					},
+				}, nil
+			}
+			return &QueryResult{Headers: []string{}, Rows: [][]any{}}, nil
+		},
+		nil,
+	)
+	ctx := setupTest(t)
+
+	result, err := FindCallees(ctx, client, FindCalleesArgs{FunctionName: "EmbeddedBackend.Execute"})
+	assertNoError(t, err)
+
+	if result.IsError {
+		t.Errorf("unexpected error: %s", result.Text)
+	}
+	assertContains(t, result.Text, "CozoDB.Run")
+}
+
+// Test FindCallees with param-based dispatch
+func TestFindCallees_ParamDispatch(t *testing.T) {
+	client := NewMockClientCustom(
+		func(ctx context.Context, script string) (*QueryResult, error) {
+			// Phase 1: Direct callees (cie_calls) — none
+			if strings.Contains(script, "cie_calls") {
+				return &QueryResult{
+					Headers: []string{"caller_name", "callee_file", "callee_name", "callee_line"},
+					Rows:    [][]any{},
+				}, nil
+			}
+			// Signature query
+			if strings.Contains(script, "signature") && !strings.Contains(script, "cie_implements") {
+				return &QueryResult{
+					Headers: []string{"signature"},
+					Rows:    [][]any{{"func storeFact(client Querier, fact string) error"}},
+				}, nil
+			}
+			// Implementation query for Querier
+			if strings.Contains(script, "cie_implements") {
+				return &QueryResult{
+					Headers: []string{"caller_name", "callee_file", "callee_name", "callee_line"},
+					Rows: [][]any{
+						{"storeFact", "pkg/tools/client.go", "CIEClient.StoreFact", 50},
+					},
+				}, nil
+			}
+			return &QueryResult{Headers: []string{}, Rows: [][]any{}}, nil
+		},
+		nil,
+	)
+	ctx := setupTest(t)
+
+	result, err := FindCallees(ctx, client, FindCalleesArgs{FunctionName: "storeFact"})
+	assertNoError(t, err)
+
+	if result.IsError {
+		t.Errorf("unexpected error: %s", result.Text)
+	}
+	assertContains(t, result.Text, "CIEClient.StoreFact")
+}
+
+// Test FindFunction suggests cie_find_type when no functions match but types do
+func TestFindFunction_SuggestsType(t *testing.T) {
+	queryCount := 0
+	client := NewMockClientCustom(
+		func(ctx context.Context, script string) (*QueryResult, error) {
+			queryCount++
+			// First query: FindFunction — returns 0 results
+			if strings.Contains(script, "cie_function") && !strings.Contains(script, "cie_type") {
+				return &QueryResult{
+					Headers: []string{"file_path", "name", "signature", "start_line", "end_line"},
+					Rows:    [][]any{},
+				}, nil
+			}
+			// Second query: type check — returns matches
+			if strings.Contains(script, "cie_type") {
+				return &QueryResult{
+					Headers: []string{"name", "kind"},
+					Rows: [][]any{
+						{"Querier", "interface"},
+					},
+				}, nil
+			}
+			return &QueryResult{Headers: []string{}, Rows: [][]any{}}, nil
+		},
+		nil,
+	)
+	ctx := setupTest(t)
+
+	result, err := FindFunction(ctx, client, FindFunctionArgs{Name: "Querier"})
+	assertNoError(t, err)
+
+	assertContains(t, result.Text, "Did you mean a type?")
+	assertContains(t, result.Text, "cie_find_type")
+	assertContains(t, result.Text, "Querier")
+	assertContains(t, result.Text, "interface")
+}
+
 func TestListFiles(t *testing.T) {
 	tests := []struct {
 		name       string

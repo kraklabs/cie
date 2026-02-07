@@ -1269,6 +1269,137 @@ func TestTracePath_TargetNotFound_WithSuggestions(t *testing.T) {
 	}
 }
 
+// Test getCallees with concrete field dispatch (non-interface fields)
+func TestGetCallees_ConcreteFieldDispatch(t *testing.T) {
+	client := NewMockClientCustom(
+		func(ctx context.Context, script string) (*QueryResult, error) {
+			// Phase 1: Direct callees (cie_calls) — none
+			if strings.Contains(script, "cie_calls") {
+				return &QueryResult{
+					Headers: []string{"callee_name", "callee_file", "callee_line"},
+					Rows:    [][]any{},
+				}, nil
+			}
+			// Phase 2: Interface field dispatch (cie_field + cie_implements) — none
+			if strings.Contains(script, "cie_field") && strings.Contains(script, "cie_implements") {
+				return &QueryResult{
+					Headers: []string{"callee_name", "callee_file", "callee_line"},
+					Rows:    [][]any{},
+				}, nil
+			}
+			// Phase 2b: Concrete field dispatch (cie_field + cie_function, no cie_implements)
+			if strings.Contains(script, "cie_field") && strings.Contains(script, "field_prefix") {
+				return &QueryResult{
+					Headers: []string{"callee_name", "callee_file", "callee_line"},
+					Rows: [][]any{
+						{"CozoDB.Run", "pkg/cozodb/cozodb.go", 42},
+						{"CozoDB.Close", "pkg/cozodb/cozodb.go", 100},
+					},
+				}, nil
+			}
+			return &QueryResult{Headers: []string{}, Rows: [][]any{}}, nil
+		},
+		nil,
+	)
+	ctx := context.Background()
+
+	callees := getCallees(ctx, client, "EmbeddedBackend.Execute")
+
+	if len(callees) != 2 {
+		t.Fatalf("getCallees() returned %d callees, want 2 from concrete field dispatch", len(callees))
+	}
+
+	names := map[string]bool{}
+	for _, c := range callees {
+		names[c.Name] = true
+	}
+	if !names["CozoDB.Run"] {
+		t.Error("should include CozoDB.Run from concrete field dispatch")
+	}
+	if !names["CozoDB.Close"] {
+		t.Error("should include CozoDB.Close from concrete field dispatch")
+	}
+}
+
+// Test fan-out reduction in param dispatch: only return methods that match direct callees
+func TestGetCallees_ParamDispatch_FilteredFanOut(t *testing.T) {
+	client := NewMockClientCustom(
+		func(ctx context.Context, script string) (*QueryResult, error) {
+			// Phase 1: Direct callees — has StoreFact as a direct callee name
+			if strings.Contains(script, "cie_calls") {
+				return &QueryResult{
+					Headers: []string{"callee_name", "callee_file", "callee_line"},
+					Rows: [][]any{
+						// This represents the "unresolved" callee that matches through interface dispatch
+						{"StoreFact", "pkg/tools/client.go", 50},
+					},
+				}, nil
+			}
+			// Signature query
+			if strings.Contains(script, "signature") && !strings.Contains(script, "cie_implements") {
+				return &QueryResult{
+					Headers: []string{"signature"},
+					Rows:    [][]any{{"func storeFact(client Querier, fact string) error"}},
+				}, nil
+			}
+			// Implementation query for Querier — returns ALL methods
+			if strings.Contains(script, "cie_implements") {
+				return &QueryResult{
+					Headers: []string{"callee_name", "callee_file", "callee_line"},
+					Rows: [][]any{
+						{"CIEClient.StoreFact", "pkg/tools/client.go", 50},
+						{"CIEClient.Query", "pkg/tools/client.go", 80},
+						{"EmbeddedQuerier.StoreFact", "pkg/tools/embedded.go", 30},
+						{"EmbeddedQuerier.Query", "pkg/tools/embedded.go", 60},
+					},
+				}, nil
+			}
+			return &QueryResult{Headers: []string{}, Rows: [][]any{}}, nil
+		},
+		nil,
+	)
+	ctx := context.Background()
+
+	callees := getCallees(ctx, client, "storeFact")
+
+	// Should include the direct callee "StoreFact" plus only StoreFact implementations
+	// (not Query implementations, which weren't called)
+	names := map[string]bool{}
+	for _, c := range callees {
+		names[c.Name] = true
+	}
+	if !names["StoreFact"] {
+		t.Error("should include direct callee StoreFact")
+	}
+	// The fan-out filter should keep StoreFact implementations but filter Query
+	if names["CIEClient.Query"] {
+		t.Error("should NOT include CIEClient.Query (not a direct callee method)")
+	}
+	if names["EmbeddedQuerier.Query"] {
+		t.Error("should NOT include EmbeddedQuerier.Query (not a direct callee method)")
+	}
+}
+
+// Test extractMethodName helper
+func TestExtractMethodName(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"CIEClient.StoreFact", "StoreFact"},
+		{"Builder.Build", "Build"},
+		{"main", ""},
+		{"", ""},
+		{"A.B.C", "C"},
+	}
+	for _, tt := range tests {
+		got := extractMethodName(tt.input)
+		if got != tt.want {
+			t.Errorf("extractMethodName(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
 // Test that findFunctionsByName now uses case-insensitive matching
 // The mock verifies the query contains regex_matches with (?i) pattern
 func TestFindFunctionsByName_CaseInsensitive(t *testing.T) {
