@@ -562,7 +562,6 @@ func TestAnalyzeState_BuildOutput(t *testing.T) {
 		// Should contain sections
 		assertContains(t, result.Text, "Section 1")
 		assertContains(t, result.Text, "Section 2")
-
 	})
 
 	t.Run("with errors", func(t *testing.T) {

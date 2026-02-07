@@ -404,6 +404,17 @@ func extractBaseTypeName(typeNode *sitter.Node, content []byte) string {
 		}
 	}
 
+	// Qualified type: pkg.Type (e.g., tools.Querier → Querier)
+	// Strip the package qualifier to match how cie_implements stores interface names.
+	if nodeType == "qualified_type" {
+		for i := 0; i < int(typeNode.ChildCount()); i++ {
+			child := typeNode.Child(i)
+			if child.Type() == "type_identifier" {
+				return string(content[child.StartByte():child.EndByte()])
+			}
+		}
+	}
+
 	// Simple type identifier
 	if nodeType == "type_identifier" {
 		return string(content[typeNode.StartByte():typeNode.EndByte()])
@@ -1053,13 +1064,6 @@ func (p *Parser) extractGoFunctionSignature(line string) (name, signature string
 // =============================================================================
 // GO TYPE EXTRACTION
 // =============================================================================
-
-// extractGoTypes extracts all type declarations from Go source.
-// Handles: struct types, interface types, and type aliases.
-func (p *TreeSitterParser) extractGoTypes(rootNode *sitter.Node, content []byte, filePath string) []TypeEntity {
-	types, _ := p.extractGoTypesAndFields(rootNode, content, filePath)
-	return types
-}
 
 // extractGoTypesAndFields extracts all type declarations and struct fields from Go source.
 // Fields are extracted from struct types to support interface dispatch resolution.

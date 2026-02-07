@@ -325,5 +325,4 @@ func printConfigHuman(cfg *ConfigOutput) {
 			}
 		}
 	}
-
 }

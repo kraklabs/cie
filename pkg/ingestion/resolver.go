@@ -417,14 +417,14 @@ func (r *CallResolver) SetInterfaceIndex(fields []FieldEntity, implements []Impl
 
 // resolveInterfaceCall resolves a call like "field.Method" through interface dispatch.
 // Returns multiple CallsEdge (one per implementing type) or nil if resolution fails.
+//
+// Handles chained access patterns common in Go:
+//   - "s.querier.StoreFact" → receiver="s", field="querier", method="StoreFact"
+//   - "querier.StoreFact"   → field="querier", method="StoreFact" (no receiver prefix)
 func (r *CallResolver) resolveInterfaceCall(call UnresolvedCall) []CallsEdge {
 	if !strings.Contains(call.CalleeName, ".") {
 		return nil
 	}
-
-	parts := strings.SplitN(call.CalleeName, ".", 2)
-	fieldName := parts[0]
-	methodName := parts[1]
 
 	// Get the caller's struct name from its function name (e.g., "Builder.Build" → "Builder")
 	callerName := r.functionIDToName[call.CallerID]
@@ -433,13 +433,31 @@ func (r *CallResolver) resolveInterfaceCall(call UnresolvedCall) []CallsEdge {
 	}
 	structName := strings.SplitN(callerName, ".", 2)[0]
 
-	// Look up the field type
-	fieldTypes, ok := r.fieldIndex[structName]
-	if !ok {
+	// Extract field name and method name from the callee name.
+	// The callee can be:
+	//   "s.querier.StoreFact" → parts ["s", "querier", "StoreFact"] → field="querier", method="StoreFact"
+	//   "querier.StoreFact"   → parts ["querier", "StoreFact"]      → field="querier", method="StoreFact"
+	parts := strings.Split(call.CalleeName, ".")
+	if len(parts) < 2 {
 		return nil
 	}
-	interfaceType, ok := fieldTypes[fieldName]
-	if !ok {
+	methodName := parts[len(parts)-1]
+
+	// Try each potential field name candidate from right to left (skip the method at the end).
+	// For "a.b.c.Method", candidates are ["c", "b", "a"].
+	fieldTypes, found := r.fieldIndex[structName]
+	if !found {
+		return nil
+	}
+
+	var interfaceType string
+	for i := len(parts) - 2; i >= 0; i-- {
+		if ft, ok := fieldTypes[parts[i]]; ok {
+			interfaceType = ft
+			break
+		}
+	}
+	if interfaceType == "" {
 		return nil
 	}
 

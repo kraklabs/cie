@@ -37,7 +37,7 @@ import (
 )
 
 const (
-	mcpVersion    = "1.7.0" // Interface dispatch resolution for call graph
+	mcpVersion    = "1.7.1" // Fix cross-package interface dispatch and trace diagnostics
 	mcpServerName = "cie"
 )
 
@@ -316,117 +316,13 @@ type mcpServer struct {
 // Parameters:
 //   - configPath: Path to .cie/project.yaml (empty string to auto-detect)
 func runMCPServer(configPath string) {
-	var cfg *Config
-	var err error
-
 	// Log current working directory for debugging
 	cwd, _ := os.Getwd()
 	fmt.Fprintf(os.Stderr, "MCP Server CWD: %s\n", cwd)
 	fmt.Fprintf(os.Stderr, "Config path arg: %q\n", configPath)
 
-	// Try to load config
-	cfg, err = LoadConfig(configPath)
-	if err != nil {
-		ue := errors.NewConfigError(
-			"Cannot load CIE configuration file",
-			"Configuration file is missing or invalid",
-			"Using environment variables as fallback. Run 'cie init' to create a proper config.",
-			err,
-		)
-		// Don't fatal, just log warning
-		fmt.Fprintf(os.Stderr, "%s\n", ue.Format(false))
-
-		// Fall back to environment variables
-		cfg = DefaultConfig("")
-		cfg.applyEnvOverrides()
-		fmt.Fprintf(os.Stderr, "Using env fallback: project=%s\n", cfg.ProjectID)
-	} else {
-		fmt.Fprintf(os.Stderr, "Config loaded: project=%s\n", cfg.ProjectID)
-	}
-
-	var client tools.Querier
-	var mode string
-	var projectID string
-
-	// Warn if CIE_BASE_URL env var is overriding the config
-	if envURL := os.Getenv("CIE_BASE_URL"); envURL != "" && cfg.CIE.EdgeCache == envURL {
-		fmt.Fprintf(os.Stderr, "Note: CIE_BASE_URL=%s is set, using remote mode. Unset it for embedded mode.\n", envURL)
-	}
-
-	if cfg.CIE.EdgeCache == "" {
-		// Embedded mode — open CozoDB directly
-		backend, err := storage.NewEmbeddedBackend(storage.EmbeddedConfig{
-			ProjectID:           cfg.ProjectID,
-			Engine:              "rocksdb",
-			EmbeddingDimensions: cfg.Embedding.Dimensions,
-		})
-		if err != nil {
-			errors.FatalError(errors.NewDatabaseError(
-				"Cannot open local database",
-				"Failed to open CozoDB for embedded MCP mode",
-				"Check that ~/.cie/data/ is accessible. Run 'cie index' first if you haven't indexed yet.",
-				err,
-			), false)
-		}
-		// Register cleanup on signal
-		go func() {
-			sigCh := make(chan os.Signal, 1)
-			signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-			<-sigCh
-			_ = backend.Close()
-			os.Exit(0)
-		}()
-		client = tools.NewEmbeddedQuerier(backend)
-		mode = "embedded"
-		projectID = cfg.ProjectID
-	} else {
-		// Remote mode — use HTTP client
-		httpClient := tools.NewCIEClient(cfg.CIE.EdgeCache, cfg.ProjectID)
-
-		// Check if remote is reachable; if not and local data exists, auto-fallback to embedded
-		if !isReachable(cfg.CIE.EdgeCache) {
-			if hasLocalData(cfg.ProjectID) {
-				fmt.Fprintf(os.Stderr, "Warning: Edge Cache at %s is not reachable. Falling back to embedded mode.\n", cfg.CIE.EdgeCache)
-				fmt.Fprintf(os.Stderr, "  Tip: Remove 'edge_cache' from .cie/project.yaml or run 'cie init --force -y' to use embedded mode by default.\n")
-				backend, err := storage.NewEmbeddedBackend(storage.EmbeddedConfig{
-					ProjectID:           cfg.ProjectID,
-					Engine:              "rocksdb",
-					EmbeddingDimensions: cfg.Embedding.Dimensions,
-				})
-				if err != nil {
-					errors.FatalError(errors.NewDatabaseError(
-						"Cannot open local database",
-						"Edge Cache is not reachable and local database failed to open",
-						"Run 'cie init --force -y' to switch to embedded mode, then 'cie index' to index.",
-						err,
-					), false)
-				}
-				go func() {
-					sigCh := make(chan os.Signal, 1)
-					signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-					<-sigCh
-					_ = backend.Close()
-					os.Exit(0)
-				}()
-				client = tools.NewEmbeddedQuerier(backend)
-				mode = "embedded (fallback)"
-				projectID = cfg.ProjectID
-			} else {
-				fmt.Fprintf(os.Stderr, "Warning: Edge Cache at %s is not reachable and no local data found.\n", cfg.CIE.EdgeCache)
-				fmt.Fprintf(os.Stderr, "  Run 'cie init --force -y && cie index' to set up local mode.\n")
-				// Continue with remote client — tools will show connection errors with helpful messages
-				httpClient.SetEmbeddingConfig(cfg.Embedding.BaseURL, cfg.Embedding.Model)
-				client = httpClient
-				mode = "remote (unreachable)"
-				projectID = cfg.ProjectID
-			}
-		} else {
-			httpClient.SetEmbeddingConfig(cfg.Embedding.BaseURL, cfg.Embedding.Model)
-			client = httpClient
-			mode = "remote"
-			projectID = cfg.ProjectID
-		}
-	}
+	cfg := loadMCPConfig(configPath)
+	client, mode, projectID := setupMCPClient(cfg)
 
 	fmt.Fprintf(os.Stderr, "  Embedding configured: %s (%s)\n", cfg.Embedding.BaseURL, cfg.Embedding.Model)
 
@@ -439,26 +335,7 @@ func runMCPServer(configPath string) {
 		customRoles:    cfg.Roles.Custom,
 	}
 
-	// Initialize git executor for git history tools
-	// Use the config file location to discover the repo root
-	if configPath != "" {
-		gitExec, gitErr := tools.NewGitExecutor(configPath)
-		if gitErr != nil {
-			fmt.Fprintf(os.Stderr, "Warning: Git history tools disabled: %v\n", gitErr)
-		} else {
-			server.gitExecutor = gitExec
-			fmt.Fprintf(os.Stderr, "  Git repo: %s\n", gitExec.RepoPath())
-		}
-	} else {
-		// Try current directory
-		gitExec, gitErr := tools.NewGitExecutor(cwd)
-		if gitErr != nil {
-			fmt.Fprintf(os.Stderr, "Warning: Git history tools disabled: %v\n", gitErr)
-		} else {
-			server.gitExecutor = gitExec
-			fmt.Fprintf(os.Stderr, "  Git repo: %s\n", gitExec.RepoPath())
-		}
-	}
+	setupGitExecutor(server, configPath, cwd)
 
 	fmt.Fprintf(os.Stderr, "CIE MCP Server v%s starting (%s mode)...\n", mcpVersion, server.mode)
 	if server.mode == "remote" {
@@ -466,6 +343,112 @@ func runMCPServer(configPath string) {
 	}
 	fmt.Fprintf(os.Stderr, "  Project: %s\n", server.projectID)
 
+	serveMCPLoop(server)
+}
+
+// loadMCPConfig loads the config file or falls back to environment variables.
+func loadMCPConfig(configPath string) *Config {
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		ue := errors.NewConfigError(
+			"Cannot load CIE configuration file",
+			"Configuration file is missing or invalid",
+			"Using environment variables as fallback. Run 'cie init' to create a proper config.",
+			err,
+		)
+		fmt.Fprintf(os.Stderr, "%s\n", ue.Format(false))
+
+		cfg = DefaultConfig("")
+		cfg.applyEnvOverrides()
+		fmt.Fprintf(os.Stderr, "Using env fallback: project=%s\n", cfg.ProjectID)
+	} else {
+		fmt.Fprintf(os.Stderr, "Config loaded: project=%s\n", cfg.ProjectID)
+	}
+	return cfg
+}
+
+// setupMCPClient creates the appropriate Querier based on config (embedded vs remote).
+func setupMCPClient(cfg *Config) (tools.Querier, string, string) {
+	// Warn if CIE_BASE_URL env var is overriding the config
+	if envURL := os.Getenv("CIE_BASE_URL"); envURL != "" && cfg.CIE.EdgeCache == envURL {
+		fmt.Fprintf(os.Stderr, "Note: CIE_BASE_URL=%s is set, using remote mode. Unset it for embedded mode.\n", envURL)
+	}
+
+	if cfg.CIE.EdgeCache == "" {
+		return setupEmbeddedClient(cfg,
+			"Cannot open local database",
+			"Failed to open CozoDB for embedded MCP mode",
+			"Check that ~/.cie/data/ is accessible. Run 'cie index' first if you haven't indexed yet.",
+			"embedded",
+		)
+	}
+	return setupRemoteClient(cfg)
+}
+
+// setupEmbeddedClient opens a local CozoDB backend and returns an EmbeddedQuerier.
+func setupEmbeddedClient(cfg *Config, title, detail, suggestion, mode string) (tools.Querier, string, string) {
+	backend, err := storage.NewEmbeddedBackend(storage.EmbeddedConfig{
+		ProjectID:           cfg.ProjectID,
+		Engine:              "rocksdb",
+		EmbeddingDimensions: cfg.Embedding.Dimensions,
+	})
+	if err != nil {
+		errors.FatalError(errors.NewDatabaseError(title, detail, suggestion, err), false)
+	}
+	go func() {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+		<-sigCh
+		_ = backend.Close()
+		os.Exit(0)
+	}()
+	return tools.NewEmbeddedQuerier(backend), mode, cfg.ProjectID
+}
+
+// setupRemoteClient configures a remote HTTP client with auto-fallback to embedded mode.
+func setupRemoteClient(cfg *Config) (tools.Querier, string, string) {
+	httpClient := tools.NewCIEClient(cfg.CIE.EdgeCache, cfg.ProjectID)
+
+	if isReachable(cfg.CIE.EdgeCache) {
+		httpClient.SetEmbeddingConfig(cfg.Embedding.BaseURL, cfg.Embedding.Model)
+		return httpClient, "remote", cfg.ProjectID
+	}
+
+	// Remote unreachable — try local fallback
+	if hasLocalData(cfg.ProjectID) {
+		fmt.Fprintf(os.Stderr, "Warning: Edge Cache at %s is not reachable. Falling back to embedded mode.\n", cfg.CIE.EdgeCache)
+		fmt.Fprintf(os.Stderr, "  Tip: Remove 'edge_cache' from .cie/project.yaml or run 'cie init --force -y' to use embedded mode by default.\n")
+		return setupEmbeddedClient(cfg,
+			"Cannot open local database",
+			"Edge Cache is not reachable and local database failed to open",
+			"Run 'cie init --force -y' to switch to embedded mode, then 'cie index' to index.",
+			"embedded (fallback)",
+		)
+	}
+
+	fmt.Fprintf(os.Stderr, "Warning: Edge Cache at %s is not reachable and no local data found.\n", cfg.CIE.EdgeCache)
+	fmt.Fprintf(os.Stderr, "  Run 'cie init --force -y && cie index' to set up local mode.\n")
+	httpClient.SetEmbeddingConfig(cfg.Embedding.BaseURL, cfg.Embedding.Model)
+	return httpClient, "remote (unreachable)", cfg.ProjectID
+}
+
+// setupGitExecutor initializes the git executor for git history tools.
+func setupGitExecutor(server *mcpServer, configPath, cwd string) {
+	path := configPath
+	if path == "" {
+		path = cwd
+	}
+	gitExec, gitErr := tools.NewGitExecutor(path)
+	if gitErr != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Git history tools disabled: %v\n", gitErr)
+		return
+	}
+	server.gitExecutor = gitExec
+	fmt.Fprintf(os.Stderr, "  Git repo: %s\n", gitExec.RepoPath())
+}
+
+// serveMCPLoop reads JSON-RPC requests from stdin and writes responses to stdout.
+func serveMCPLoop(server *mcpServer) {
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 1024*1024), 10*1024*1024)
 

@@ -202,10 +202,11 @@ func FindCallers(ctx context.Context, client Querier, args FindCallersArgs) (*To
 			`?[caller_file, caller_name, caller_line, callee_name] :=
 				callee_name = %q,
 				*cie_implements { type_name: %q, interface_name },
-				*cie_field { struct_name: caller_struct, field_type: interface_name },
+				*cie_field { struct_name: caller_struct, field_type },
+				(field_type = interface_name or ends_with(field_type, concat(".", interface_name))),
+				caller_prefix = concat(caller_struct, "."),
 				*cie_function { name: caller_name, file_path: caller_file, start_line: caller_line },
-				starts_with(caller_name, caller_struct),
-				regex_matches(caller_name, "[.]")
+				starts_with(caller_name, caller_prefix)
 			:limit 50`,
 			args.FunctionName, structName)
 
@@ -250,10 +251,12 @@ func FindCallees(ctx context.Context, client Querier, args FindCalleesArgs) (*To
 			`?[caller_name, callee_file, callee_name, callee_line] :=
 				caller_name = %q,
 				*cie_field { struct_name: %q, field_type },
-				*cie_implements { interface_name: field_type, type_name: impl_type },
+				*cie_implements { interface_name },
+				(field_type = interface_name or ends_with(field_type, concat(".", interface_name))),
+				*cie_implements { interface_name, type_name: impl_type },
+				impl_prefix = concat(impl_type, "."),
 				*cie_function { name: callee_name, file_path: callee_file, start_line: callee_line },
-				starts_with(callee_name, impl_type),
-				regex_matches(callee_name, "[.]")
+				starts_with(callee_name, impl_prefix)
 			:limit 50`,
 			args.FunctionName, structName,
 		)
@@ -303,24 +306,32 @@ func ListFiles(ctx context.Context, client Querier, args ListFilesArgs) (*ToolRe
 	return NewResult(FormatQueryResult(result, script)), nil
 }
 
-// mergeQueryResults appends rows from src into dst, deduplicating by the first column value.
+// mergeQueryResults appends rows from src into dst, deduplicating by composite key of all columns.
 func mergeQueryResults(dst, src *QueryResult) *QueryResult {
 	seen := make(map[string]bool)
 	for _, row := range dst.Rows {
-		if len(row) > 0 {
-			seen[AnyToString(row[0])] = true
-		}
+		seen[rowKey(row)] = true
 	}
 	for _, row := range src.Rows {
-		if len(row) > 0 {
-			key := AnyToString(row[0])
-			if !seen[key] {
-				seen[key] = true
-				dst.Rows = append(dst.Rows, row)
-			}
+		key := rowKey(row)
+		if !seen[key] {
+			seen[key] = true
+			dst.Rows = append(dst.Rows, row)
 		}
 	}
 	return dst
+}
+
+// rowKey builds a composite dedup key from all columns of a row.
+func rowKey(row []any) string {
+	var sb strings.Builder
+	for i, v := range row {
+		if i > 0 {
+			sb.WriteByte('|')
+		}
+		sb.WriteString(AnyToString(v))
+	}
+	return sb.String()
 }
 
 // RawQueryArgs holds arguments for raw queries.

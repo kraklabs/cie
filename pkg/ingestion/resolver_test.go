@@ -370,6 +370,100 @@ func TestCallResolver_ResolveInterfaceFieldCall_NonInterfaceIgnored(t *testing.T
 	}
 }
 
+func TestCallResolver_ResolveInterfaceFieldCall_ChainedAccess(t *testing.T) {
+	// Test the critical case: "b.writer.Write" where "b" is the receiver variable
+	// The parser captures the full expression including the receiver.
+	// The resolver must skip the receiver and identify "writer" as the field name.
+
+	files := []FileEntity{
+		{ID: "file:store.go", Path: "internal/store/store.go", Language: "go"},
+	}
+	functions := []FunctionEntity{
+		{ID: "fn:Builder.Build", Name: "Builder.Build", FilePath: "internal/store/store.go"},
+		{ID: "fn:CozoDB.Write", Name: "CozoDB.Write", FilePath: "internal/store/store.go"},
+	}
+	imports := []ImportEntity{}
+	packageNames := map[string]string{
+		"internal/store/store.go": "store",
+	}
+
+	fields := []FieldEntity{
+		{StructName: "Builder", FieldName: "writer", FieldType: "Writer"},
+	}
+	implements := []ImplementsEdge{
+		{TypeName: "CozoDB", InterfaceName: "Writer"},
+	}
+
+	// Callee name includes receiver prefix: "b.writer.Write"
+	unresolvedCalls := []UnresolvedCall{
+		{
+			CallerID:   "fn:Builder.Build",
+			CalleeName: "b.writer.Write",
+			FilePath:   "internal/store/store.go",
+			Line:       10,
+		},
+	}
+
+	resolver := NewCallResolver()
+	resolver.BuildIndex(files, functions, imports, packageNames)
+	resolver.SetInterfaceIndex(fields, implements)
+
+	resolvedCalls := resolver.ResolveCalls(unresolvedCalls)
+
+	if len(resolvedCalls) != 1 {
+		t.Fatalf("expected 1 resolved call via chained interface dispatch, got %d", len(resolvedCalls))
+	}
+	if resolvedCalls[0].CalleeID != "fn:CozoDB.Write" {
+		t.Errorf("expected callee fn:CozoDB.Write, got %s", resolvedCalls[0].CalleeID)
+	}
+}
+
+func TestCallResolver_ResolveInterfaceFieldCall_DeeplyChained(t *testing.T) {
+	// Even deeper: "m.engine.querier.StoreFact" — should find "querier" in Engine's fields
+	// This tests that we scan right-to-left for field name matches.
+
+	files := []FileEntity{
+		{ID: "file:memory.go", Path: "pkg/memory/memory.go", Language: "go"},
+	}
+	functions := []FunctionEntity{
+		{ID: "fn:Engine.Store", Name: "Engine.Store", FilePath: "pkg/memory/memory.go"},
+		{ID: "fn:Client.StoreFact", Name: "Client.StoreFact", FilePath: "pkg/memory/client.go"},
+	}
+	imports := []ImportEntity{}
+	packageNames := map[string]string{
+		"pkg/memory/memory.go": "memory",
+	}
+
+	fields := []FieldEntity{
+		{StructName: "Engine", FieldName: "querier", FieldType: "Querier"},
+	}
+	implements := []ImplementsEdge{
+		{TypeName: "Client", InterfaceName: "Querier"},
+	}
+
+	unresolvedCalls := []UnresolvedCall{
+		{
+			CallerID:   "fn:Engine.Store",
+			CalleeName: "m.engine.querier.StoreFact",
+			FilePath:   "pkg/memory/memory.go",
+			Line:       15,
+		},
+	}
+
+	resolver := NewCallResolver()
+	resolver.BuildIndex(files, functions, imports, packageNames)
+	resolver.SetInterfaceIndex(fields, implements)
+
+	resolvedCalls := resolver.ResolveCalls(unresolvedCalls)
+
+	if len(resolvedCalls) != 1 {
+		t.Fatalf("expected 1 resolved call for deeply chained access, got %d", len(resolvedCalls))
+	}
+	if resolvedCalls[0].CalleeID != "fn:Client.StoreFact" {
+		t.Errorf("expected callee fn:Client.StoreFact, got %s", resolvedCalls[0].CalleeID)
+	}
+}
+
 func TestCallResolver_NoDuplicates(t *testing.T) {
 	// Ensure no duplicate edges are created
 

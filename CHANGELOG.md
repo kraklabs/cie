@@ -5,6 +5,18 @@ All notable changes to CIE (Code Intelligence Engine) will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.2] - 2026-02-07
+
+### Fixed
+- **Cross-package interface dispatch** — Field types with package qualifiers (e.g., `tools.Querier`) now correctly match against interface names in `cie_implements`. Previously, `cie_field` stored `tools.Querier` while `cie_implements` stored `Querier`, breaking the join for cross-package references.
+- **Chained field access resolution** — Calls like `s.querier.StoreFact()` are now resolved correctly. Previously the resolver split on the first dot, confusing the receiver variable (`s`) with the field name (`querier`).
+- **Overly broad type matching in dispatch queries** — `starts_with(callee_name, "Client")` no longer matches `ClientPool.Get`. Uses `concat(impl_type, ".")` for exact type prefix matching.
+- **Trace partial path reporting** — When `cie_trace_path` fails to find a path, it now shows the deepest partial path explored with file:line locations, helping diagnose where the trace got stuck.
+- **mergeQueryResults dedup** — `FindCallees` interface dispatch results were silently dropped because dedup used only column 0 (`caller_name`, same for all rows). Now uses composite key of all columns.
+
+### Changed
+- MCP server version bumped to 1.7.1.
+
 ## [0.7.1] - 2026-02-07
 
 ### Added
@@ -218,6 +230,7 @@ Initial open source release of CIE (Code Intelligence Engine).
 - All API keys via environment variables only
 
 [unreleased]: https://github.com/kraklabs/cie/compare/v0.7.1...HEAD
+[0.7.2]: https://github.com/kraklabs/cie/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/kraklabs/cie/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/kraklabs/cie/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/kraklabs/cie/compare/v0.5.0...v0.6.0

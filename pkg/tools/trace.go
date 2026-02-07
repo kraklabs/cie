@@ -98,6 +98,7 @@ type traceSearchResult struct {
 	nodesExplored int
 	limitReached  bool
 	canceled      bool
+	deepestPath   []TraceFuncInfo // longest partial path explored (when no full path found)
 }
 
 // pathNode represents a node in the BFS traversal.
@@ -127,6 +128,10 @@ func runTraceSearch(ctx context.Context, client Querier, sources []TraceFuncInfo
 
 		srcResult := searchFromSource(ctx, client, src, targetSet, args, calleesCache, &result.nodesExplored, maxNodesExplored, maxQueriesPerSource)
 		result.paths = append(result.paths, srcResult.paths...)
+		// Track the deepest partial path across all sources
+		if len(srcResult.deepestPath) > len(result.deepestPath) {
+			result.deepestPath = srcResult.deepestPath
+		}
 		if srcResult.limitReached {
 			result.limitReached = true
 			break
@@ -169,6 +174,11 @@ func searchFromSource(ctx context.Context, client Querier, src TraceFuncInfo, ta
 		visited[current.funcName] = true
 		*totalNodes++
 
+		// Track deepest partial path for diagnostic output
+		if len(current.path) > len(result.deepestPath) {
+			result.deepestPath = current.path
+		}
+
 		if targetSet[current.funcName] && len(current.path) > 1 {
 			result.paths = append(result.paths, current.path)
 			continue
@@ -198,6 +208,23 @@ func formatTraceNotFound(sources []TraceFuncInfo, args TracePathArgs, result tra
 	fmt.Fprintf(&sb, "No path found from %s to '%s' within depth %d.\n\n",
 		formatSources(sources, args.Source == ""), args.Target, args.MaxDepth)
 	fmt.Fprintf(&sb, "_Explored %d nodes before stopping._\n\n", result.nodesExplored)
+
+	// Show partial path to help diagnose where the trace got stuck
+	if len(result.deepestPath) > 1 {
+		sb.WriteString("**Deepest partial path explored:**\n```\n")
+		for i, fn := range result.deepestPath {
+			indent := strings.Repeat("  ", i)
+			arrow := ""
+			if i > 0 {
+				arrow = "→ "
+			}
+			fmt.Fprintf(&sb, "%s%s%s\n", indent, arrow, fn.Name)
+			fmt.Fprintf(&sb, "%s   %s:%s\n", indent, ExtractFileName(fn.FilePath), fn.Line)
+		}
+		lastFn := result.deepestPath[len(result.deepestPath)-1]
+		fmt.Fprintf(&sb, "```\n_Chain stopped at `%s` — no outgoing calls reached the target._\n\n", lastFn.Name)
+	}
+
 	if result.limitReached {
 		sb.WriteString("**Note:** Search limit reached (explored 5000 nodes). The path may exist but wasn't found in the explored portion of the call graph.\n\n")
 	}
@@ -206,7 +233,7 @@ func formatTraceNotFound(sources []TraceFuncInfo, args TracePathArgs, result tra
 	sb.WriteString("- Use `path_pattern` to narrow the search scope (e.g., `path_pattern=\"apps/core\"`)\n")
 	sb.WriteString("- Check if the target function name is correct with `cie_find_function`\n")
 	sb.WriteString("- Specify a `source` function closer to the target to reduce search space\n")
-	sb.WriteString("- The call might be through an interface or dynamic dispatch (not statically traceable)\n")
+	sb.WriteString("- Ensure the codebase was re-indexed with the latest CIE version (`cie index --full`)\n")
 	return sb.String()
 }
 
@@ -366,10 +393,12 @@ func getCallees(ctx context.Context, client Querier, funcName string) []TraceFun
 		dispatchScript := fmt.Sprintf(
 			`?[callee_name, callee_file, callee_line] :=
 				*cie_field { struct_name: %q, field_type },
-				*cie_implements { interface_name: field_type, type_name: impl_type },
+				*cie_implements { interface_name },
+				(field_type = interface_name or ends_with(field_type, concat(".", interface_name))),
+				*cie_implements { interface_name, type_name: impl_type },
+				impl_prefix = concat(impl_type, "."),
 				*cie_function { name: callee_name, file_path: callee_file, start_line: callee_line },
-				starts_with(callee_name, impl_type),
-				regex_matches(callee_name, "[.]")
+				starts_with(callee_name, impl_prefix)
 			:limit 50`,
 			structName,
 		)
