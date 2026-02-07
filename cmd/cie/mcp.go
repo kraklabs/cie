@@ -37,7 +37,7 @@ import (
 )
 
 const (
-	mcpVersion    = "1.6.0" // Added MCP server instructions for AI agents
+	mcpVersion    = "1.7.0" // Interface dispatch resolution for call graph
 	mcpServerName = "cie"
 )
 

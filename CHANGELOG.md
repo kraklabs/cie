@@ -5,6 +5,19 @@ All notable changes to CIE (Code Intelligence Engine) will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-02-07
+
+### Added
+- **Interface dispatch resolution** — Call graph now resolves calls through interface-typed struct fields. When a struct holds an interface field (e.g., `Writer`), CIE traces through to the concrete implementations, dramatically improving call graph completeness for dependency injection patterns.
+- New `cie_field` relation storing struct field names and types.
+- New `cie_implements` relation mapping concrete types to interfaces via method set matching.
+- `BuildImplementsIndex` in ingestion pipeline matches method sets against interface declarations.
+
+### Changed
+- `FindCallers`, `FindCallees`, and `TracePath` now include interface dispatch edges in results.
+- `CallResolver` falls back to interface dispatch when direct call resolution fails.
+- MCP server version bumped to 1.7.0.
+
 ## [0.7.0] - 2026-02-06
 
 ### Added
@@ -204,7 +217,10 @@ Initial open source release of CIE (Code Intelligence Engine).
 - No hardcoded credentials in codebase
 - All API keys via environment variables only
 
-[unreleased]: https://github.com/kraklabs/cie/compare/v0.5.0...HEAD
+[unreleased]: https://github.com/kraklabs/cie/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/kraklabs/cie/compare/v0.7.0...v0.7.1
+[0.7.0]: https://github.com/kraklabs/cie/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/kraklabs/cie/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/kraklabs/cie/compare/v0.4.7...v0.5.0
 [0.4.7]: https://github.com/kraklabs/cie/compare/v0.4.6...v0.4.7
 [0.4.6]: https://github.com/kraklabs/cie/compare/v0.4.5...v0.4.6

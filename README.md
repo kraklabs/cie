@@ -23,7 +23,7 @@ CIE indexes your codebase and provides semantic search, call graph analysis, and
 ## Why CIE?
 
 - **Semantic Search** - Find code by meaning, not just text matching
-- **Call Graph Analysis** - Trace execution paths from entry points to any function
+- **Call Graph Analysis** - Trace execution paths including interface dispatch resolution
 - **MCP Native** - Works seamlessly with Claude Code, Cursor, and any MCP client
 - **Fast** - Indexes 100k LOC in seconds, queries in milliseconds
 - **Private** - All data stays local, your code never leaves your machine
