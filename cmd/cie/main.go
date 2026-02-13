@@ -159,7 +159,8 @@ Getting Started:
   4. Run MCP server:            cie --mcp
 
 Data Storage:
-  Data is stored locally in ~/.cie/data/<project_id>/
+  Data is stored locally in the configured data directory
+  (default: ~/.cie/data/<project_id>/)
 
 Environment Variables:
   OLLAMA_HOST        Ollama URL (default: http://localhost:11434)

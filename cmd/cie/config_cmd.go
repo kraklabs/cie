@@ -59,10 +59,11 @@ type EmbeddingOutput struct {
 
 // IndexingOutput represents indexing settings for JSON output.
 type IndexingOutput struct {
-	ParserMode  string   `json:"parser_mode"`
-	BatchTarget int      `json:"batch_target"`
-	MaxFileSize int64    `json:"max_file_size"`
-	Exclude     []string `json:"exclude"`
+	ParserMode   string   `json:"parser_mode"`
+	BatchTarget  int      `json:"batch_target"`
+	MaxFileSize  int64    `json:"max_file_size"`
+	Exclude      []string `json:"exclude"`
+	LocalDataDir string   `json:"local_data_dir,omitempty"`
 }
 
 // RolesConfigOutput represents custom role patterns for JSON output.
@@ -243,10 +244,11 @@ func buildConfigOutput(configPath string, cfg *Config) *ConfigOutput {
 			Model:    cfg.Embedding.Model,
 		},
 		Indexing: IndexingOutput{
-			ParserMode:  cfg.Indexing.ParserMode,
-			BatchTarget: cfg.Indexing.BatchTarget,
-			MaxFileSize: cfg.Indexing.MaxFileSize,
-			Exclude:     cfg.Indexing.Exclude,
+			ParserMode:   cfg.Indexing.ParserMode,
+			BatchTarget:  cfg.Indexing.BatchTarget,
+			MaxFileSize:  cfg.Indexing.MaxFileSize,
+			Exclude:      cfg.Indexing.Exclude,
+			LocalDataDir: cfg.Indexing.LocalDataDir,
 		},
 	}
 
@@ -298,6 +300,9 @@ func printConfigHuman(cfg *ConfigOutput) {
 	fmt.Printf("  Parser Mode:  %s\n", cfg.Indexing.ParserMode)
 	fmt.Printf("  Batch Target: %d\n", cfg.Indexing.BatchTarget)
 	fmt.Printf("  Max File:     %d bytes\n", cfg.Indexing.MaxFileSize)
+	if cfg.Indexing.LocalDataDir != "" {
+		fmt.Printf("  Data Dir:     %s\n", cfg.Indexing.LocalDataDir)
+	}
 	if len(cfg.Indexing.Exclude) > 0 {
 		fmt.Printf("  Exclude:      %d patterns\n", len(cfg.Indexing.Exclude))
 		for _, pattern := range cfg.Indexing.Exclude {

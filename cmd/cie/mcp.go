@@ -27,7 +27,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -234,8 +233,8 @@ type mcpCapabilities struct {
 type mcpInitializeResult struct {
 	ProtocolVersion string          `json:"protocolVersion"`
 	Capabilities    mcpCapabilities `json:"capabilities"`
-	ServerInfo      mcpServerInfo   `json:"serverInfo"`     // Server identification
-	Instructions    string          `json:"instructions"`   // Usage instructions for AI agents
+	ServerInfo      mcpServerInfo   `json:"serverInfo"`   // Server identification
+	Instructions    string          `json:"instructions"` // Usage instructions for AI agents
 }
 
 // mcpTool describes a single tool exposed by the MCP server.
@@ -282,8 +281,8 @@ type mcpContent struct {
 // and git executor for git history tools.
 type mcpServer struct {
 	client         tools.Querier
-	projectID      string                 // Project ID for error messages
-	mode           string                 // "embedded" or "remote" for logging
+	projectID      string // Project ID for error messages
+	mode           string // "embedded" or "remote" for logging
 	embeddingURL   string
 	embeddingModel string
 	customRoles    map[string]RolePattern // Custom role patterns from config
@@ -325,7 +324,7 @@ func runMCPServer(configPath string) {
 	fmt.Fprintf(os.Stderr, "Config path arg: %q\n", configPath)
 
 	cfg := loadMCPConfig(configPath)
-	client, mode, projectID := setupMCPClient(cfg)
+	client, mode, projectID := setupMCPClient(cfg, configPath)
 
 	fmt.Fprintf(os.Stderr, "  Embedding configured: %s (%s)\n", cfg.Embedding.BaseURL, cfg.Embedding.Model)
 
@@ -371,26 +370,32 @@ func loadMCPConfig(configPath string) *Config {
 }
 
 // setupMCPClient creates the appropriate Querier based on config (embedded vs remote).
-func setupMCPClient(cfg *Config) (tools.Querier, string, string) {
+func setupMCPClient(cfg *Config, configPath string) (tools.Querier, string, string) {
 	// Warn if CIE_BASE_URL env var is overriding the config
 	if envURL := os.Getenv("CIE_BASE_URL"); envURL != "" && cfg.CIE.EdgeCache == envURL {
 		fmt.Fprintf(os.Stderr, "Note: CIE_BASE_URL=%s is set, using remote mode. Unset it for embedded mode.\n", envURL)
 	}
 
 	if cfg.CIE.EdgeCache == "" {
-		return setupEmbeddedClient(cfg,
+		return setupEmbeddedClient(cfg, configPath,
 			"Cannot open local database",
 			"Failed to open CozoDB for embedded MCP mode",
-			"Check that ~/.cie/data/ is accessible. Run 'cie index' first if you haven't indexed yet.",
+			"Check that your local CIE data directory is accessible. Run 'cie index' first if needed.",
 			"embedded",
 		)
 	}
-	return setupRemoteClient(cfg)
+	return setupRemoteClient(cfg, configPath)
 }
 
 // setupEmbeddedClient opens a local CozoDB backend and returns an EmbeddedQuerier.
-func setupEmbeddedClient(cfg *Config, title, detail, suggestion, mode string) (tools.Querier, string, string) {
+func setupEmbeddedClient(cfg *Config, configPath, title, detail, suggestion, mode string) (tools.Querier, string, string) {
+	dataDir, err := projectDataDir(cfg, configPath)
+	if err != nil {
+		errors.FatalError(err, false)
+	}
+
 	backend, err := storage.NewEmbeddedBackend(storage.EmbeddedConfig{
+		DataDir:             dataDir,
 		ProjectID:           cfg.ProjectID,
 		Engine:              "rocksdb",
 		EmbeddingDimensions: cfg.Embedding.Dimensions,
@@ -402,6 +407,7 @@ func setupEmbeddedClient(cfg *Config, title, detail, suggestion, mode string) (t
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 		<-sigCh
+		signal.Stop(sigCh)
 		_ = backend.Close()
 		os.Exit(0)
 	}()
@@ -409,7 +415,7 @@ func setupEmbeddedClient(cfg *Config, title, detail, suggestion, mode string) (t
 }
 
 // setupRemoteClient configures a remote HTTP client with auto-fallback to embedded mode.
-func setupRemoteClient(cfg *Config) (tools.Querier, string, string) {
+func setupRemoteClient(cfg *Config, configPath string) (tools.Querier, string, string) {
 	httpClient := tools.NewCIEClient(cfg.CIE.EdgeCache, cfg.ProjectID)
 
 	if isReachable(cfg.CIE.EdgeCache) {
@@ -418,10 +424,10 @@ func setupRemoteClient(cfg *Config) (tools.Querier, string, string) {
 	}
 
 	// Remote unreachable — try local fallback
-	if hasLocalData(cfg.ProjectID) {
+	if hasLocalData(cfg, configPath) {
 		fmt.Fprintf(os.Stderr, "Warning: Edge Cache at %s is not reachable. Falling back to embedded mode.\n", cfg.CIE.EdgeCache)
 		fmt.Fprintf(os.Stderr, "  Tip: Remove 'edge_cache' from .cie/project.yaml or run 'cie init --force -y' to use embedded mode by default.\n")
-		return setupEmbeddedClient(cfg,
+		return setupEmbeddedClient(cfg, configPath,
 			"Cannot open local database",
 			"Edge Cache is not reachable and local database failed to open",
 			"Run 'cie init --force -y' to switch to embedded mode, then 'cie index' to index.",
@@ -1579,7 +1585,7 @@ func (s *mcpServer) formatError(toolName string, err error) *mcpToolResult {
 			msg = "**Database Error:** Cannot read local database\n\n"
 			msg += "### How to fix:\n"
 			msg += "- Run 'cie index' to index the project first\n"
-			msg += "- Check that ~/.cie/data/ exists and is accessible\n"
+			msg += "- Check that the configured local data directory exists and is accessible\n"
 		} else {
 			msg = "**Connection Error:** Cannot connect to Edge Cache\n\n"
 			msg += "### Possible causes:\n"
@@ -1798,12 +1804,11 @@ func isReachable(url string) bool {
 }
 
 // hasLocalData checks if there's an existing CozoDB database for the project.
-func hasLocalData(projectID string) bool {
-	homeDir, err := os.UserHomeDir()
+func hasLocalData(cfg *Config, configPath string) bool {
+	dataDir, err := projectDataDir(cfg, configPath)
 	if err != nil {
 		return false
 	}
-	dataDir := filepath.Join(homeDir, ".cie", "data", projectID)
 	info, err := os.Stat(dataDir)
 	return err == nil && info.IsDir()
 }

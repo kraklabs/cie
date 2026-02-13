@@ -85,7 +85,7 @@ cie index
 ```
 
 **What happens:**
-- CIE parses your code locally using Tree-sitter and stores the index in `~/.cie/data/<project>/`.
+- CIE parses your code locally using Tree-sitter and stores the index in `<local_data_dir>/<project>` (default: `~/.cie/data/<project>`).
 - Functions, types, and call graphs are extracted and stored.
 
 > **Note:** Ollama is optional. Without it, CIE indexes all metadata (functions, types, calls) but skips embeddings. 20+ tools work without embeddings; semantic search requires them.
@@ -164,7 +164,7 @@ cie serve --port 9090
 ```
 
 This starts a local HTTP server that:
-- Uses your local indexed data from `~/.cie/data/<project_id>/`
+- Uses your local indexed data from `<local_data_dir>/<project_id>/` (default: `~/.cie/data/<project_id>/`)
 - Exposes a REST API for querying the index
 
 However, `cie --mcp` now works directly in embedded mode -- no server needed. For most users, the MCP integration is the recommended way to connect CIE to AI assistants.

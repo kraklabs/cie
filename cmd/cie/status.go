@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"time"
 
 	flag "github.com/spf13/pflag"
@@ -126,16 +125,10 @@ Output Fields:
 	}
 
 	// Determine data directory
-	homeDir, err := os.UserHomeDir()
+	dataDir, err := projectDataDir(cfg, configPath)
 	if err != nil {
-		errors.FatalError(errors.NewInternalError(
-			"Cannot determine home directory",
-			"Operating system failed to provide user home directory path",
-			"Check your system configuration or set the HOME environment variable",
-			err,
-		), globals.JSON)
+		errors.FatalError(err, globals.JSON)
 	}
-	dataDir := filepath.Join(homeDir, ".cie", "data", cfg.ProjectID)
 
 	result := &StatusResult{
 		ProjectID: cfg.ProjectID,

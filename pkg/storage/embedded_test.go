@@ -23,8 +23,11 @@ package storage
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -612,5 +615,54 @@ func TestEmbeddedBackend_DB(t *testing.T) {
 	}
 	if len(result.Headers) == 0 {
 		t.Error("expected headers in direct DB result")
+	}
+}
+
+// TestIsStaleLock_NoLockFile tests isStaleLock when LOCK file doesn't exist.
+func TestIsStaleLock_NoLockFile(t *testing.T) {
+	dir := t.TempDir()
+	if isStaleLock(dir) {
+		t.Error("expected false when LOCK file doesn't exist")
+	}
+}
+
+// TestIsStaleLock_StaleLock tests isStaleLock with a stale LOCK file (no flock held).
+func TestIsStaleLock_StaleLock(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "LOCK")
+
+	// Create a LOCK file without holding flock
+	f, err := os.Create(lockPath)
+	if err != nil {
+		t.Fatalf("failed to create LOCK file: %v", err)
+	}
+	f.Close()
+
+	if !isStaleLock(dir) {
+		t.Error("expected true for stale LOCK file (no process holding flock)")
+	}
+}
+
+// TestIsStaleLock_ActiveLock tests isStaleLock with an active flock held.
+func TestIsStaleLock_ActiveLock(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "LOCK")
+
+	// Create and hold an exclusive flock
+	f, err := os.Create(lockPath)
+	if err != nil {
+		t.Fatalf("failed to create LOCK file: %v", err)
+	}
+	defer f.Close()
+
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatalf("failed to acquire flock: %v", err)
+	}
+	defer func() {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	}()
+
+	if isStaleLock(dir) {
+		t.Error("expected false when another process holds the flock")
 	}
 }

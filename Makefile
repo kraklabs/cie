@@ -30,7 +30,7 @@ ifeq ($(GOOS),windows)
 endif
 
 # Install directory (defaults to ~/go/bin, override with INSTALL_DIR=path)
-INSTALL_DIR ?= $(HOME)/go/bin
+INSTALL_DIR ?= $(GOPATH)/bin
 
 .PHONY: all build test test-short test-coverage lint fmt fmt-check clean docker-build docker-push tools run help deps install
 
@@ -46,6 +46,9 @@ build: deps ## Build the cie binary
 install: build ## Install cie binary globally (default: ~/go/bin, override: INSTALL_DIR=path)
 	@mkdir -p $(INSTALL_DIR)
 	@cp bin/cie $(INSTALL_DIR)/cie
+ifeq ($(GOOS),darwin)
+	@codesign --force --sign - $(INSTALL_DIR)/cie
+endif
 	@echo "✓ Installed cie to $(INSTALL_DIR)/cie"
 
 deps: ## Download dependencies (CozoDB)

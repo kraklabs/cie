@@ -61,10 +61,11 @@ type EmbeddingConfig struct {
 
 // IndexingConfig contains indexing settings.
 type IndexingConfig struct {
-	ParserMode  string   `yaml:"parser_mode"`   // auto, treesitter
-	BatchTarget int      `yaml:"batch_target"`  // mutations per batch
-	MaxFileSize int64    `yaml:"max_file_size"` // bytes
-	Exclude     []string `yaml:"exclude"`       // glob patterns
+	ParserMode   string   `yaml:"parser_mode"`              // auto, treesitter
+	BatchTarget  int      `yaml:"batch_target"`             // mutations per batch
+	MaxFileSize  int64    `yaml:"max_file_size"`            // bytes
+	Exclude      []string `yaml:"exclude"`                  // glob patterns
+	LocalDataDir string   `yaml:"local_data_dir,omitempty"` // custom data root (project dir appended)
 }
 
 // RolesConfig contains custom role pattern definitions.
@@ -346,6 +347,9 @@ func (c *Config) applyEnvOverrides() {
 	}
 	if model := os.Getenv("OLLAMA_EMBED_MODEL"); model != "" {
 		c.Embedding.Model = model
+	}
+	if dataDir := os.Getenv("CIE_DATA_DIR"); dataDir != "" {
+		c.Indexing.LocalDataDir = dataDir
 	}
 }
 

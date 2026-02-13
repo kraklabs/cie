@@ -6,7 +6,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	flag "github.com/spf13/pflag"
 
@@ -26,7 +25,8 @@ Description:
   WARNING: This is a destructive operation that deletes all locally
   indexed data for the current project.
 
-  Removes the ~/.cie/data/<project_id>/ directory, including:
+  Removes the configured data directory for the project
+  (default: ~/.cie/data/<project_id>/), including:
   - All indexed code intelligence data
   - Embeddings and call graphs
   - Indexing checkpoints
@@ -61,21 +61,14 @@ Notes:
 		), false)
 	}
 
-	cieDir, err := getCIEDir()
-	if err != nil {
-		errors.FatalError(errors.NewInternalError(
-			"Failed to find CIE directory",
-			err.Error(),
-			"",
-			err,
-		), globals.JSON)
-	}
-
 	// Load configuration to get project ID
 	cfg, err := LoadConfig(configPath)
 	if err != nil {
-		// If no config, just clean up the data directory
-		dataDir := filepath.Join(cieDir, "data")
+		// If no config, just clean up the data root directory
+		dataDir, rootErr := dataRootFromConfig(nil, configPath)
+		if rootErr != nil {
+			errors.FatalError(rootErr, globals.JSON)
+		}
 		if err := os.RemoveAll(dataDir); err != nil {
 			ui.Warningf("Failed to remove data directory: %v", err)
 		}
@@ -84,7 +77,10 @@ Notes:
 	}
 
 	// Determine data directory
-	dataDir := filepath.Join(cieDir, "data", cfg.ProjectID)
+	dataDir, err := projectDataDir(cfg, configPath)
+	if err != nil {
+		errors.FatalError(err, globals.JSON)
+	}
 
 	// Check if data directory exists
 	if _, err := os.Stat(dataDir); os.IsNotExist(err) {

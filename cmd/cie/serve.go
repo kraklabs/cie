@@ -195,7 +195,8 @@ func runServe(args []string, cfg *Config) int {
 		sigChan := make(chan os.Signal, 1)
 		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 		<-sigChan
-		log.Println("Shutting down CIE server...")
+		signal.Stop(sigChan)
+		log.Println("Shutting down CIE server... Press Ctrl+C again to force quit.")
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = server.Shutdown(ctx)

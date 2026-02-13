@@ -38,7 +38,6 @@ import (
 	"github.com/kraklabs/cie/internal/errors"
 	"github.com/kraklabs/cie/internal/ui"
 	"github.com/kraklabs/cie/pkg/ingestion"
-	"github.com/kraklabs/cie/pkg/storage"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -87,7 +86,8 @@ Description:
   changed files since the last index. Use --full to force a complete
   reindex from scratch.
 
-  Indexed data is stored locally in ~/.cie/data/<project_id>/
+  Indexed data is stored in the configured local data directory
+  (default: ~/.cie/data/<project_id>/).
 
 Options:
 `)
@@ -132,6 +132,13 @@ Notes:
 		return
 	}
 
+	dataDir, err := projectDataDir(cfg, configPath)
+	if err != nil {
+		errors.FatalError(err, globals.JSON)
+	}
+
+	warnLegacyDataDir(cfg, dataDir)
+
 	// Setup logging
 	logLevel := slog.LevelInfo
 	if *debug {
@@ -141,14 +148,6 @@ Notes:
 		Level: logLevel,
 	}))
 	slog.SetDefault(logger)
-
-	// Check for existing data — skip if forced
-	if !*full && !*forceFullReindex {
-		hasData, funcCount, err := checkLocalData(cfg)
-		if err == nil && hasData {
-			fmt.Printf("Project '%s' already has %d functions indexed.\n", cfg.ProjectID, funcCount)
-		}
-	}
 
 	// Start Prometheus metrics endpoint (optional)
 	if *metricsAddr != "" {
@@ -173,7 +172,9 @@ Notes:
 	go func() {
 		sig := <-sigChan
 		logger.Info("shutdown.signal", "signal", sig.String())
+		fmt.Fprintf(os.Stderr, "\nShutting down... Press Ctrl+C again to force quit.\n")
 		cancel()
+		signal.Stop(sigChan)
 	}()
 
 	// Get current directory as repo path
@@ -192,8 +193,6 @@ Notes:
 
 	// Delete local data if force-full-reindex is requested
 	if *forceFullReindex {
-		homeDir, _ := os.UserHomeDir()
-		dataDir := filepath.Join(homeDir, ".cie", "data", cfg.ProjectID)
 		if err := os.RemoveAll(dataDir); err == nil {
 			logger.Info("data.deleted", "path", dataDir)
 		} else if !os.IsNotExist(err) {
@@ -201,52 +200,7 @@ Notes:
 		}
 	}
 
-	runLocalIndex(ctx, logger, cfg, cwd, embeddingProvider, *embedWorkers, *full, globals)
-}
-
-// checkLocalData checks if local indexed data exists and returns the function count.
-//
-// Returns:
-//   - bool: true if local data exists and is accessible
-//   - int: number of functions indexed (0 if no data)
-//   - error: error if database cannot be opened
-func checkLocalData(cfg *Config) (bool, int, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return false, 0, err
-	}
-
-	dataDir := filepath.Join(homeDir, ".cie", "data", cfg.ProjectID)
-	if _, err := os.Stat(dataDir); os.IsNotExist(err) {
-		return false, 0, nil
-	}
-
-	backend, err := storage.NewEmbeddedBackend(storage.EmbeddedConfig{
-		ProjectID:           cfg.ProjectID,
-		Engine:              "rocksdb",
-		EmbeddingDimensions: cfg.Embedding.Dimensions,
-	})
-	if err != nil {
-		return true, 0, nil // directory exists but can't open DB
-	}
-	defer backend.Close()
-
-	result, err := backend.Query(context.Background(), "?[count(id)] := *cie_function{id}")
-	if err != nil || len(result.Rows) == 0 {
-		return true, 0, nil
-	}
-
-	count := 0
-	if row := result.Rows[0]; len(row) > 0 {
-		if v, ok := row[0].(float64); ok {
-			count = int(v)
-		}
-		if v, ok := row[0].(int); ok {
-			count = v
-		}
-	}
-
-	return true, count, nil
+	runLocalIndex(ctx, logger, cfg, configPath, cwd, dataDir, embeddingProvider, *embedWorkers, *full, globals)
 }
 
 // runLocalIndex executes the local indexing pipeline, writing results to the embedded database.
@@ -262,7 +216,7 @@ func checkLocalData(cfg *Config) (bool, int, error) {
 //   - embeddingProvider: Embedding provider name (ollama, nomic, mock)
 //   - embedWorkers: Number of parallel workers for embedding generation
 //   - globals: Global CLI flags for progress/output control
-func runLocalIndex(ctx context.Context, logger *slog.Logger, cfg *Config, repoPath, embeddingProvider string, embedWorkers int, forceReindex bool, globals GlobalFlags) {
+func runLocalIndex(ctx context.Context, logger *slog.Logger, cfg *Config, configPath, repoPath, dataDir, embeddingProvider string, embedWorkers int, forceReindex bool, globals GlobalFlags) {
 	// Ensure checkpoint directory exists
 	checkpointDir := filepath.Join(ConfigDir(repoPath), "checkpoints")
 	if err := os.MkdirAll(checkpointDir, 0750); err != nil {
@@ -291,6 +245,8 @@ func runLocalIndex(ctx context.Context, logger *slog.Logger, cfg *Config, repoPa
 			BatchTargetMutations: cfg.Indexing.BatchTarget,
 			MaxFileSizeBytes:     cfg.Indexing.MaxFileSize,
 			CheckpointPath:       checkpointDir,
+			LocalDataDir:         dataDir,
+			LocalEngine:          "rocksdb",
 			ExcludeGlobs:         excludeGlobs,
 			ForceReindex:         forceReindex,
 			Concurrency: ingestion.ConcurrencyConfig{
@@ -323,6 +279,13 @@ func runLocalIndex(ctx context.Context, logger *slog.Logger, cfg *Config, repoPa
 		), false)
 	}
 	defer func() { _ = pipeline.Close() }()
+
+	// Report existing index size (query through the already-open pipeline DB)
+	if !forceReindex {
+		if count := pipeline.FunctionCount(); count > 0 {
+			fmt.Printf("Project '%s' already has %d functions indexed.\n", cfg.ProjectID, count)
+		}
+	}
 
 	// Set up progress reporting
 	progressCfg := NewProgressConfig(globals)
@@ -366,7 +329,7 @@ func runLocalIndex(ctx context.Context, logger *slog.Logger, cfg *Config, repoPa
 		), false)
 	}
 
-	printResult(result)
+	printResult(result, cfg, configPath)
 }
 
 // phaseDescription returns a human-readable description for each pipeline phase.
@@ -413,7 +376,7 @@ func mapEmbeddingProvider(provider string) string {
 //
 // Displays statistics about files processed, functions extracted, embeddings generated,
 // and overall execution time. Used to provide user feedback after indexing completes.
-func printResult(result *ingestion.IngestionResult) {
+func printResult(result *ingestion.IngestionResult, cfg *Config, configPath string) {
 	fmt.Println()
 
 	// Detect no-op incremental run (everything up to date)
@@ -478,8 +441,33 @@ func printResult(result *ingestion.IngestionResult) {
 	fmt.Println()
 
 	// Show data location
-	homeDir, _ := os.UserHomeDir()
-	fmt.Printf("Data stored in: %s\n", ui.DimText(filepath.Join(homeDir, ".cie", "data", result.ProjectID)))
+	dataDir, err := projectDataDir(cfg, configPath)
+	if err != nil {
+		fmt.Printf("Data stored in: %s\n", ui.DimText("<unknown>"))
+		return
+	}
+	fmt.Printf("Data stored in: %s\n", ui.DimText(dataDir))
+}
+
+func warnLegacyDataDir(cfg *Config, currentDataDir string) {
+	if cfg == nil || cfg.ProjectID == "" || cfg.Indexing.LocalDataDir == "" {
+		return
+	}
+	legacyDataDir, err := legacyDefaultProjectDataDir(cfg.ProjectID)
+	if err != nil || legacyDataDir == currentDataDir {
+		return
+	}
+
+	if _, err := os.Stat(legacyDataDir); err != nil {
+		return
+	}
+	if _, err := os.Stat(currentDataDir); !os.IsNotExist(err) {
+		return
+	}
+
+	ui.Warningf("Found existing index at default path: %s", legacyDataDir)
+	ui.Infof("Using configured data path: %s", currentDataDir)
+	ui.Info("No automatic migration is performed. Run 'cie index' to build data in the new location.")
 }
 
 // runRemoteIndex delegates indexing to the remote CIE server.

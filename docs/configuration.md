@@ -108,6 +108,7 @@ indexing:                    # Indexing behavior
   parser_mode: "..."
   batch_target: 500
   max_file_size: 1048576
+  local_data_dir: "~/.cie/data"
   exclude: [...]
 
 roles:                       # Custom role patterns (optional)
@@ -360,6 +361,24 @@ indexing:
 
 **Performance note:** Larger files take longer to parse and generate more embeddings. If indexing is slow, consider lowering this value.
 
+#### indexing.local_data_dir
+
+- **Type:** `string`
+- **Required:** No
+- **Default:** `~/.cie/data`
+- **Environment Override:** `CIE_DATA_DIR`
+- **Description:** Root directory for local embedded data. CIE appends `/<project_id>` automatically.
+
+**Path resolution:**
+- Absolute paths are used as-is
+- Relative paths are resolved from the directory containing `.cie/project.yaml`
+
+**Example:**
+```yaml
+indexing:
+  local_data_dir: "/mnt/cie-data"
+```
+
 #### indexing.exclude
 
 - **Type:** `array of strings`
@@ -564,6 +583,7 @@ Environment variables override configuration file values. Use them for:
 | `CIE_PROJECT_ID` | `string` | from config | Override project ID |
 | `CIE_PRIMARY_HUB` | `string` | `localhost:50051` | Primary Hub gRPC address |
 | `CIE_BASE_URL` | `string` | `""` (empty) | Edge Cache HTTP URL (remote mode only) |
+| `CIE_DATA_DIR` | `string` | `~/.cie/data` | Override local embedded data root (`/<project_id>` is appended) |
 | `CIE_LLM_URL` | `string` | — | Enable LLM, set base URL |
 | `CIE_LLM_MODEL` | `string` | — | LLM model name |
 | `CIE_LLM_API_KEY` | `string` | — | LLM API key |
@@ -1202,13 +1222,13 @@ indexing:
 
 ### Storage Settings
 
-CIE stores data in `~/.cie/data/<project_id>/` (embedded mode) or connects to remote servers.
+CIE stores data in `<local_data_dir>/<project_id>/` (embedded mode) or connects to remote servers.
+By default, `local_data_dir` is `~/.cie/data`.
 
 **Local storage:**
 ```
-~/.cie/
-└── data/
-    └── <project_id>/        # CozoDB database files
+<local_data_dir>/
+└── <project_id>/            # CozoDB database files
         ├── cozo_data.db
         └── cozo_wal.db
 ```

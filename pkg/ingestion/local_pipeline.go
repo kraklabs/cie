@@ -218,6 +218,26 @@ func NewLocalPipeline(config Config, logger *slog.Logger) (*LocalPipeline, error
 	}, nil
 }
 
+// FunctionCount returns the number of functions currently indexed in the database.
+func (p *LocalPipeline) FunctionCount() int {
+	if p.backend == nil {
+		return 0
+	}
+	result, err := p.backend.Query(context.Background(), "?[count(id)] := *cie_function{id}")
+	if err != nil || len(result.Rows) == 0 {
+		return 0
+	}
+	if row := result.Rows[0]; len(row) > 0 {
+		if v, ok := row[0].(float64); ok {
+			return int(v)
+		}
+		if v, ok := row[0].(int); ok {
+			return v
+		}
+	}
+	return 0
+}
+
 // Close cleans up resources.
 func (p *LocalPipeline) Close() error {
 	var lastErr error

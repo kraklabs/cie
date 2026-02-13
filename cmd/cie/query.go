@@ -26,7 +26,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -143,16 +142,10 @@ Notes:
 	}
 
 	// Determine data directory
-	homeDir, err := os.UserHomeDir()
+	dataDir, err := projectDataDir(cfg, configPath)
 	if err != nil {
-		errors.FatalError(errors.NewInternalError(
-			"Cannot determine home directory",
-			"Operating system did not provide user home directory path",
-			"Check your system configuration or set HOME environment variable",
-			err,
-		), globals.JSON)
+		errors.FatalError(err, globals.JSON)
 	}
-	dataDir := filepath.Join(homeDir, ".cie", "data", cfg.ProjectID)
 
 	// Check if data directory exists
 	if _, err := os.Stat(dataDir); os.IsNotExist(err) {

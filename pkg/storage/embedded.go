@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 
 	cozo "github.com/kraklabs/cie/pkg/cozodb"
 )
@@ -82,7 +83,15 @@ func NewEmbeddedBackend(config EmbeddedConfig) (*EmbeddedBackend, error) {
 	// Open CozoDB
 	db, err := cozo.New(config.Engine, config.DataDir, nil)
 	if err != nil {
-		return nil, fmt.Errorf("open cozodb: %w", err)
+		if config.Engine == "rocksdb" && isStaleLock(config.DataDir) {
+			lockPath := filepath.Join(config.DataDir, "LOCK")
+			if err2 := os.Remove(lockPath); err2 == nil {
+				db, err = cozo.New(config.Engine, config.DataDir, nil)
+			}
+		}
+		if err != nil {
+			return nil, fmt.Errorf("open cozodb: %w", err)
+		}
 	}
 
 	// Default embedding dimensions to 768 (nomic-embed-text)
@@ -379,4 +388,23 @@ func (b *EmbeddedBackend) DeleteEntitiesForFile(filePath string) error {
 	}
 
 	return nil
+}
+
+// isStaleLock checks if the RocksDB LOCK file in dataDir is stale.
+// A lock is stale if the LOCK file exists but no process holds an
+// exclusive flock on it (the original process died).
+func isStaleLock(dataDir string) bool {
+	lockPath := filepath.Join(dataDir, "LOCK")
+	f, err := os.OpenFile(lockPath, os.O_RDWR, 0)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	// Non-blocking exclusive lock attempt
+	err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+	if err != nil {
+		return false // Another process holds the lock
+	}
+	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	return true
 }

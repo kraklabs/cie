@@ -24,8 +24,9 @@ package cozodb
 #include <string.h>
 #include "cozo_c.h"
 
-// CGO flags for linking - these are overridden by environment variables
-#cgo LDFLAGS: -lcozo_c -lstdc++ -lm
+// CGO flags for linking.
+// Use ${SRCDIR} so "go install ./cmd/cie" can find the vendored static library in ./lib.
+#cgo LDFLAGS: -L${SRCDIR}/../../lib -lcozo_c -lstdc++ -lm
 #cgo windows LDFLAGS: -lbcrypt -lwsock32 -lws2_32 -lshlwapi -lrpcrt4
 #cgo darwin LDFLAGS: -framework Security
 */

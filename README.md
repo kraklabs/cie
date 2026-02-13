@@ -250,7 +250,7 @@ When running as an MCP server, CIE provides 20+ tools organized by category:
 
 ## Data Storage
 
-CIE stores indexed data locally in `~/.cie/data/<project_id>/` using embedded CozoDB with RocksDB backend. This ensures:
+CIE stores indexed data locally in `<local_data_dir>/<project_id>/` (default: `~/.cie/data/<project_id>/`) using embedded CozoDB with RocksDB backend. This ensures:
 
 - Your code never leaves your machine
 - Fast local queries
@@ -294,7 +294,7 @@ CIE uses an embedded architecture -- a single binary handles indexing, querying,
 │  │  - cie index  → Parses code, writes to local CozoDB  │    │
 │  │  - cie --mcp  → Reads from local CozoDB              │    │
 │  │                                                       │    │
-│  │  Data: ~/.cie/data/<project>/  (RocksDB)             │    │
+│  │  Data: <local_data_dir>/<project>/ (RocksDB)         │    │
 │  └──────────────────────────────────────────────────────┘    │
 │                                                               │
 │  ┌──────────────┐  (optional)                                │
@@ -307,7 +307,7 @@ CIE uses an embedded architecture -- a single binary handles indexing, querying,
 **Key Components:**
 
 - **CIE CLI**: Single binary handles indexing, querying, and MCP serving
-- **CozoDB + RocksDB**: Embedded database stored locally at `~/.cie/data/<project>/`
+- **CozoDB + RocksDB**: Embedded database stored locally at `<local_data_dir>/<project>` (default `~/.cie/data/<project>`)
 - **Ollama (optional)**: Local embedding generation for semantic search
 - **Tree-sitter**: Code parsing for Go, Python, JS, TS
 

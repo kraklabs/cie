@@ -121,7 +121,7 @@
 //
 // Indexed data is stored locally in:
 //
-//	~/.cie/data/<project_id>/
+//	<configured_data_dir>/<project_id>/ (default: ~/.cie/data/<project_id>/)
 //
 // This includes RocksDB databases for local storage and CozoDB for
 // Datalog-based queries. Use the reset command to clear local data.
