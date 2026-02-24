@@ -267,6 +267,8 @@ func runLocalIndex(ctx context.Context, logger *slog.Logger, cfg *Config, config
 		if cfg.Embedding.APIKey != "" {
 			_ = os.Setenv("OPENAI_API_KEY", cfg.Embedding.APIKey)
 		}
+	case "llamacpp", "qodo":
+		_ = os.Setenv("LLAMACPP_EMBED_URL", cfg.Embedding.BaseURL)
 	}
 
 	pipeline, err := ingestion.NewLocalPipeline(config, logger)
@@ -367,8 +369,12 @@ func mapEmbeddingProvider(provider string) string {
 		return "openai"
 	case "mock":
 		return "mock"
+	case "llamacpp", "qodo":
+		return provider
 	default:
-		return "mock"
+		// Preserve unknown values so CreateEmbeddingProvider can return a clear error
+		// instead of silently falling back to mock.
+		return provider
 	}
 }
 
