@@ -355,6 +355,12 @@ func (e *UserError) Format(noColor bool) string {
 		out.WriteString("\n")
 	}
 
+	if e.Err != nil {
+		out.WriteString("Details: ")
+		out.WriteString(e.Err.Error())
+		out.WriteString("\n")
+	}
+
 	return out.String()
 }
 
