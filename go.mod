@@ -4,6 +4,7 @@ go 1.24.0
 
 require (
 	github.com/fatih/color v1.18.0
+	github.com/fsnotify/fsnotify v1.7.0
 	github.com/mattn/go-isatty v0.0.20
 	github.com/prometheus/client_golang v1.22.0
 	github.com/schollz/progressbar/v3 v3.19.0

@@ -38,6 +38,12 @@ type EmbeddedBackend struct {
 	mu                  sync.RWMutex
 	closed              bool
 	embeddingDimensions int
+	
+	// config stores the original configuration for reopening
+	config EmbeddedConfig
+	
+	// coordinator manages indexing state and locking
+	coordinator *ReindexCoordinator
 }
 
 // EmbeddedConfig configures the embedded backend.
@@ -74,6 +80,8 @@ func NewEmbeddedBackend(config EmbeddedConfig) (*EmbeddedBackend, error) {
 			config.DataDir = filepath.Join(config.DataDir, config.ProjectID)
 		}
 	}
+	// Note: config.DataDir should already include the project subdirectory if applicable
+	// We store the config as-is for reopen() to use
 
 	// Ensure data directory exists
 	if err := os.MkdirAll(config.DataDir, 0750); err != nil {
@@ -103,11 +111,20 @@ func NewEmbeddedBackend(config EmbeddedConfig) (*EmbeddedBackend, error) {
 	return &EmbeddedBackend{
 		db:                  &db,
 		embeddingDimensions: embeddingDim,
+		config:              config,
+		coordinator:         GetReindexCoordinator(),
 	}, nil
 }
 
 // Query executes a read-only Datalog query.
+// It acquires a read lock from the coordinator to prevent conflicts with reindexing.
 func (b *EmbeddedBackend) Query(ctx context.Context, datalog string) (*QueryResult, error) {
+	// Acquire read permission from coordinator (waits if draining, fails if indexing)
+	if err := b.coordinator.AcquireRead(ctx); err != nil {
+		return nil, err
+	}
+	defer b.coordinator.ReleaseRead()
+
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
@@ -131,6 +148,10 @@ func (b *EmbeddedBackend) Query(ctx context.Context, datalog string) (*QueryResu
 }
 
 // Execute runs a Datalog mutation.
+// Note: We don't check coordinator state here because during reindex,
+// the reindex operation itself needs to write to the database.
+// The coordinator prevents MCP tool queries during reindex, but the
+// reindex pipeline creates its own backend connection that needs to write.
 func (b *EmbeddedBackend) Execute(ctx context.Context, datalog string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -166,6 +187,74 @@ func (b *EmbeddedBackend) Close() error {
 	b.closed = true
 	b.db.Close()
 	return nil
+}
+
+// CloseAndRelease closes the database and releases the lock for external reindexing.
+// This allows another process (or the same process after reopening) to write to the database.
+// Returns a function that must be called to reopen the database when reindexing is complete.
+func (b *EmbeddedBackend) CloseAndRelease() (func() error, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.closed {
+		// Already closed, return a reopen function
+		return func() error {
+			return b.reopen()
+		}, nil
+	}
+
+	b.closed = true
+	b.db.Close()
+
+	return func() error {
+		return b.reopen()
+	}, nil
+}
+
+// reopen reopens the database connection using the stored configuration.
+// Caller must NOT hold b.mu (it's acquired internally).
+func (b *EmbeddedBackend) reopen() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if !b.closed {
+		return nil // Already open
+	}
+
+	// Open CozoDB
+	db, err := cozo.New(b.config.Engine, b.config.DataDir, nil)
+	if err != nil {
+		if b.config.Engine == "rocksdb" && isStaleLock(b.config.DataDir) {
+			lockPath := filepath.Join(b.config.DataDir, "LOCK")
+			if err2 := os.Remove(lockPath); err2 == nil {
+				db, err = cozo.New(b.config.Engine, b.config.DataDir, nil)
+			}
+		}
+		if err != nil {
+			return fmt.Errorf("reopen cozodb: %w", err)
+		}
+	}
+
+	b.db = &db
+	b.closed = false
+	return nil
+}
+
+// Reopen is a public method to reopen the database after CloseAndRelease.
+func (b *EmbeddedBackend) Reopen() error {
+	return b.reopen()
+}
+
+// IsClosed returns true if the backend is currently closed.
+func (b *EmbeddedBackend) IsClosed() bool {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.closed
+}
+
+// Coordinator returns the reindex coordinator associated with this backend.
+func (b *EmbeddedBackend) Coordinator() *ReindexCoordinator {
+	return b.coordinator
 }
 
 // DB returns the underlying CozoDB instance for advanced operations.

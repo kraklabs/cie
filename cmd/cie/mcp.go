@@ -24,13 +24,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/kraklabs/cie/internal/errors"
+	"github.com/kraklabs/cie/pkg/ingestion"
 	"github.com/kraklabs/cie/pkg/storage"
 	"github.com/kraklabs/cie/pkg/tools"
 )
@@ -278,7 +281,7 @@ type mcpContent struct {
 //
 // Holds the CIE client for database queries, embedding configuration for
 // semantic search, custom role patterns from the project configuration,
-// and git executor for git history tools.
+// git executor for git history tools, and file watcher for auto-reindex.
 type mcpServer struct {
 	client         tools.Querier
 	projectID      string // Project ID for error messages
@@ -287,6 +290,18 @@ type mcpServer struct {
 	embeddingModel string
 	customRoles    map[string]RolePattern // Custom role patterns from config
 	gitExecutor    tools.GitRunner        // Git executor for history tools (may be nil)
+	
+	// File watcher for auto-reindex
+	fileWatcher *ingestion.FileWatcher
+	
+	// Backend reference for reindex coordination (only for embedded mode)
+	backend *storage.EmbeddedBackend
+	
+	// Project root for file watching
+	projectRoot string
+	
+	// Config path for saving settings
+	configPath string
 }
 
 // runMCPServer starts the CIE Model Context Protocol server.
@@ -324,7 +339,7 @@ func runMCPServer(configPath string) {
 	fmt.Fprintf(os.Stderr, "Config path arg: %q\n", configPath)
 
 	cfg := loadMCPConfig(configPath)
-	client, mode, projectID := setupMCPClient(cfg, configPath)
+	client, backend, mode, projectID := setupMCPClient(cfg, configPath)
 
 	fmt.Fprintf(os.Stderr, "  Embedding configured: %s (%s)\n", cfg.Embedding.BaseURL, cfg.Embedding.Model)
 
@@ -335,9 +350,17 @@ func runMCPServer(configPath string) {
 		embeddingURL:   cfg.Embedding.BaseURL,
 		embeddingModel: cfg.Embedding.Model,
 		customRoles:    cfg.Roles.Custom,
+		backend:        backend,
+		projectRoot:    cwd,
+		configPath:     configPath,
 	}
 
 	setupGitExecutor(server, configPath, cwd)
+	
+	// Setup and start file watcher for auto-reindex (embedded mode only)
+	if mode == "embedded" || mode == "embedded (fallback)" {
+		setupFileWatcher(server, cfg, cwd)
+	}
 
 	fmt.Fprintf(os.Stderr, "CIE MCP Server v%s starting (%s mode)...\n", mcpVersion, server.mode)
 	if server.mode == "remote" {
@@ -346,6 +369,11 @@ func runMCPServer(configPath string) {
 	fmt.Fprintf(os.Stderr, "  Project: %s\n", server.projectID)
 
 	serveMCPLoop(server)
+	
+	// Cleanup: stop file watcher
+	if server.fileWatcher != nil {
+		server.fileWatcher.Stop()
+	}
 }
 
 // loadMCPConfig loads the config file or falls back to environment variables.
@@ -370,7 +398,8 @@ func loadMCPConfig(configPath string) *Config {
 }
 
 // setupMCPClient creates the appropriate Querier based on config (embedded vs remote).
-func setupMCPClient(cfg *Config, configPath string) (tools.Querier, string, string) {
+// Returns the Querier, the backend (only for embedded mode), mode string, and project ID.
+func setupMCPClient(cfg *Config, configPath string) (tools.Querier, *storage.EmbeddedBackend, string, string) {
 	// Warn if CIE_BASE_URL env var is overriding the config
 	if envURL := os.Getenv("CIE_BASE_URL"); envURL != "" && cfg.CIE.EdgeCache == envURL {
 		fmt.Fprintf(os.Stderr, "Note: CIE_BASE_URL=%s is set, using remote mode. Unset it for embedded mode.\n", envURL)
@@ -388,11 +417,20 @@ func setupMCPClient(cfg *Config, configPath string) (tools.Querier, string, stri
 }
 
 // setupEmbeddedClient opens a local CozoDB backend and returns an EmbeddedQuerier.
-func setupEmbeddedClient(cfg *Config, configPath, title, detail, suggestion, mode string) (tools.Querier, string, string) {
+func setupEmbeddedClient(cfg *Config, configPath, title, detail, suggestion, mode string) (tools.Querier, *storage.EmbeddedBackend, string, string) {
+	// Ensure ProjectID is set - derive from directory if needed
+	if cfg.ProjectID == "" {
+		cwd, _ := os.Getwd()
+		cfg.ProjectID = filepath.Base(cwd)
+		fmt.Fprintf(os.Stderr, "ProjectID not set in config, using directory name: %s\n", cfg.ProjectID)
+	}
+
 	dataDir, err := projectDataDir(cfg, configPath)
 	if err != nil {
 		errors.FatalError(err, false)
 	}
+
+	fmt.Fprintf(os.Stderr, "Opening database: %s (project: %s)\n", dataDir, cfg.ProjectID)
 
 	backend, err := storage.NewEmbeddedBackend(storage.EmbeddedConfig{
 		DataDir:             dataDir,
@@ -411,16 +449,16 @@ func setupEmbeddedClient(cfg *Config, configPath, title, detail, suggestion, mod
 		_ = backend.Close()
 		os.Exit(0)
 	}()
-	return tools.NewEmbeddedQuerier(backend), mode, cfg.ProjectID
+	return tools.NewEmbeddedQuerier(backend), backend, mode, cfg.ProjectID
 }
 
 // setupRemoteClient configures a remote HTTP client with auto-fallback to embedded mode.
-func setupRemoteClient(cfg *Config, configPath string) (tools.Querier, string, string) {
+func setupRemoteClient(cfg *Config, configPath string) (tools.Querier, *storage.EmbeddedBackend, string, string) {
 	httpClient := tools.NewCIEClient(cfg.CIE.EdgeCache, cfg.ProjectID)
 
 	if isReachable(cfg.CIE.EdgeCache) {
 		httpClient.SetEmbeddingConfig(cfg.Embedding.BaseURL, cfg.Embedding.Model)
-		return httpClient, "remote", cfg.ProjectID
+		return httpClient, nil, "remote", cfg.ProjectID
 	}
 
 	// Remote unreachable — try local fallback
@@ -438,7 +476,7 @@ func setupRemoteClient(cfg *Config, configPath string) (tools.Querier, string, s
 	fmt.Fprintf(os.Stderr, "Warning: Edge Cache at %s is not reachable and no local data found.\n", cfg.CIE.EdgeCache)
 	fmt.Fprintf(os.Stderr, "  Run 'cie init --force -y && cie index' to set up local mode.\n")
 	httpClient.SetEmbeddingConfig(cfg.Embedding.BaseURL, cfg.Embedding.Model)
-	return httpClient, "remote (unreachable)", cfg.ProjectID
+	return httpClient, nil, "remote (unreachable)", cfg.ProjectID
 }
 
 // setupGitExecutor initializes the git executor for git history tools.
@@ -454,6 +492,98 @@ func setupGitExecutor(server *mcpServer, configPath, cwd string) {
 	}
 	server.gitExecutor = gitExec
 	fmt.Fprintf(os.Stderr, "  Git repo: %s\n", gitExec.RepoPath())
+}
+
+// setupFileWatcher initializes and starts the file watcher for auto-reindex.
+func setupFileWatcher(server *mcpServer, cfg *Config, projectRoot string) {
+	// Load auto-reindex configuration - first try the Config struct, then fall back to file
+	reindexConfig := storage.DefaultReindexConfig()
+	
+	// Use config from Config struct if available
+	if cfg.AutoReindex.Enabled || cfg.AutoReindex.DebounceMs > 0 {
+		reindexConfig.AutoReindex = cfg.AutoReindex.Enabled
+		if cfg.AutoReindex.DebounceMs > 0 {
+			reindexConfig.DebounceMs = cfg.AutoReindex.DebounceMs
+		}
+		if len(cfg.AutoReindex.ExcludePatterns) > 0 {
+			reindexConfig.ExcludePatterns = cfg.AutoReindex.ExcludePatterns
+		}
+		if len(cfg.AutoReindex.WatchExtensions) > 0 {
+			reindexConfig.WatchExtensions = cfg.AutoReindex.WatchExtensions
+		}
+	} else {
+		// Fall back to loading from file directly
+		configPath := server.configPath
+		if configPath == "" {
+			configPath = filepath.Join(projectRoot, ".cie", "project.yaml")
+		}
+		reindexConfig = tools.GetAutoReindexConfig(configPath)
+	}
+	
+	// Update the coordinator with loaded config
+	coordinator := storage.GetReindexCoordinator()
+	coordinator.SetConfig(reindexConfig)
+	
+	// Set up callbacks for auto-reindex jobs
+	coordinator.SetReindexCallbacks(
+		// onReindexStart: called when an auto-reindex job should start
+		func(job *storage.ReindexJob) error {
+			// Close backend to release lock
+			if server.backend != nil {
+				reopen, err := server.backend.CloseAndRelease()
+				if err != nil {
+					return fmt.Errorf("failed to release database lock: %w", err)
+				}
+				
+				// Run reindex in background
+				go func() {
+					ctx := job.Context
+					_, _ = tools.Reindex(ctx, tools.ReindexArgs{
+						Force:       false,
+						Paths:       job.Paths,
+						ProjectRoot: projectRoot,
+						ConfigPath:  server.configPath,
+					})
+					
+					// Reopen backend
+					if reopenErr := reopen(); reopenErr != nil {
+						fmt.Fprintf(os.Stderr, "CRITICAL: failed to reopen database after auto-reindex: %v\n", reopenErr)
+					}
+				}()
+			}
+			return nil
+		},
+		// onReindexDone: called when reindex completes
+		func(job *storage.ReindexJob, err error) {
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Auto-reindex failed: %v\n", err)
+			}
+		},
+	)
+
+	// Create file watcher (watcher only DETECTS changes, it doesn't run reindex)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+	
+	watcher, err := ingestion.NewFileWatcher(projectRoot, reindexConfig, logger)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: File watcher initialization failed: %v\n", err)
+		return
+	}
+
+	server.fileWatcher = watcher
+
+	// Start watcher if auto-reindex is enabled
+	if reindexConfig.AutoReindex {
+		if err := watcher.Start(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: File watcher failed to start: %v\n", err)
+			return
+		}
+		fmt.Fprintf(os.Stderr, "  Auto-reindex: enabled (debounce: %dms)\n", reindexConfig.DebounceMs)
+	} else {
+		fmt.Fprintf(os.Stderr, "  Auto-reindex: disabled (use cie_index_config to enable)\n")
+	}
 }
 
 // serveMCPLoop reads JSON-RPC requests from stdin and writes responses to stdout.
@@ -520,13 +650,71 @@ func (s *mcpServer) getTools() []mcpTool {
 	return []mcpTool{
 		{
 			Name:        "cie_index_status",
-			Description: "Check the indexing status for a path. Shows how many files and functions are indexed, and warns if the index appears incomplete. Use this FIRST when searches return no results to verify the path is indexed.",
+			Description: "Check the indexing status for a path. Shows how many files and functions are indexed, indexing state, auto-reindex settings, and warns if the index appears incomplete. Use this FIRST when searches return no results to verify the path is indexed.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"path_pattern": map[string]any{
 						"type":        "string",
 						"description": "Path pattern to check (e.g., 'apps/gateway' or 'internal/'). Leave empty to check entire index.",
+					},
+				},
+				"required": []string{},
+			},
+		},
+		{
+			Name:        "cie_reindex",
+			Description: "Trigger a full or incremental reindex of the codebase, or cancel a running reindex. Use this when files have changed and you want to update the index. For incremental reindex (faster), use force=false. For full reindex (complete rebuild), use force=true. To cancel a running reindex, provide cancel_job_id.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"force": map[string]any{
+						"type":        "boolean",
+						"description": "If true, performs a full reindex. If false (default), performs incremental reindex which only processes changed files.",
+						"default":     false,
+					},
+					"paths": map[string]any{
+						"type":        "array",
+						"items":       map[string]any{"type": "string"},
+						"description": "Optional: specific file paths to reindex. If provided, only these files will be reindexed (incremental mode).",
+					},
+					"cancel_job_id": map[string]any{
+						"type":        "string",
+						"description": "Optional: Job ID to cancel. If provided, cancels the running reindex operation instead of starting a new one.",
+					},
+				},
+				"required": []string{},
+			},
+		},
+		{
+			Name:        "cie_index_config",
+			Description: "Configure auto-reindex behavior. Enable file watching to automatically reindex when files change. Set debounce delay and exclude patterns to control which files trigger reindex.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"auto_reindex": map[string]any{
+						"type":        "boolean",
+						"description": "Enable or disable automatic reindexing when files change.",
+					},
+					"debounce_ms": map[string]any{
+						"type":        "integer",
+						"description": "Delay in milliseconds before triggering reindex after file change. Default: 2000 (2 seconds). Range: 100-60000.",
+						"default":     2000,
+					},
+					"exclude_patterns": map[string]any{
+						"type":        "array",
+						"items":       map[string]any{"type": "string"},
+						"description": "Glob patterns for files/directories to exclude from watching (e.g., '*.log', 'temp/**').",
+					},
+					"watch_extensions": map[string]any{
+						"type":        "array",
+						"items":       map[string]any{"type": "string"},
+						"description": "File extensions to watch for changes (e.g., '.go', '.js', '.ts'). Default: common code file extensions.",
+					},
+					"get_only": map[string]any{
+						"type":        "boolean",
+						"description": "If true, returns current configuration without modifying it.",
+						"default":     false,
 					},
 				},
 				"required": []string{},
@@ -1203,6 +1391,8 @@ var toolHandlers = map[string]toolHandler{
 	"cie_analyze":                handleAnalyze,
 	"cie_find_type":              handleFindType,
 	"cie_index_status":           handleIndexStatus,
+	"cie_reindex":                handleReindex,
+	"cie_index_config":           handleIndexConfig,
 	"cie_grep":                   handleGrep,
 	"cie_verify_absence":         handleVerifyAbsence,
 	"cie_list_services":          handleListServices,
@@ -1223,6 +1413,30 @@ func (s *mcpServer) handleToolCall(ctx context.Context, params mcpToolCallParams
 			Content: []mcpContent{{Type: "text", Text: fmt.Sprintf("Unknown tool: %s", params.Name)}},
 			IsError: true,
 		}, nil
+	}
+
+	// Check if indexing is in progress
+	// Some tools (index_status, reindex, index_config) are allowed during indexing
+	allowedDuringIndexing := map[string]bool{
+		"cie_index_status": true,
+		"cie_reindex":      true,
+		"cie_index_config": true,
+	}
+
+	if !allowedDuringIndexing[params.Name] {
+		if err := tools.CheckReindexInProgress(); err != nil {
+			return &mcpToolResult{
+				Content: []mcpContent{{
+					Type: "text",
+					Text: fmt.Sprintf("**Indexing in Progress** ⏳\n\n"+
+						"%s\n\n"+
+						"Please try again shortly, or cancel the current reindex with:\n"+
+						"```\ncie_reindex(cancel_job_id=\"<job_id>\")\n```",
+						err.Error()),
+				}},
+				IsError: true,
+			}, nil
+		}
 	}
 
 	result, err := handler(ctx, s, params.Arguments)
@@ -1399,6 +1613,100 @@ func handleFindType(ctx context.Context, s *mcpServer, args map[string]any) (*to
 func handleIndexStatus(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
 	pathPattern, _ := args["path_pattern"].(string)
 	return tools.IndexStatus(ctx, s.client, pathPattern, s.projectID, s.mode)
+}
+
+func handleReindex(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
+	// Check if this is an embedded mode server (reindex only works in embedded mode)
+	if s.backend == nil {
+		return tools.NewError("Reindex is only available in embedded mode. " +
+			"The MCP server is running in remote mode and cannot modify the index."), nil
+	}
+
+	// Check for cancellation request
+	if cancelJobID, ok := args["cancel_job_id"].(string); ok && cancelJobID != "" {
+		return tools.Reindex(ctx, tools.ReindexArgs{
+			CancelJobID: cancelJobID,
+		})
+	}
+
+	force, _ := args["force"].(bool)
+	paths := extractStringArray(args, "paths")
+
+	// The coordinator handles:
+	// 1. Waiting for active queries to complete (draining)
+	// 2. Closing the backend (releasing RocksDB lock)
+	// 3. Running reindex
+	// 4. Reopening the backend
+	// 
+	// We need to close our backend reference before reindex starts,
+	// and reopen it after.
+
+	// Close backend to release lock
+	reopen, err := s.backend.CloseAndRelease()
+	if err != nil {
+		return nil, fmt.Errorf("failed to release database lock: %w", err)
+	}
+
+	// Run reindex
+	result, reindexErr := tools.Reindex(ctx, tools.ReindexArgs{
+		Force:       force,
+		Paths:       paths,
+		ProjectRoot: s.projectRoot,
+		ConfigPath:  s.configPath,
+	})
+
+	// Reopen backend
+	if reopenErr := reopen(); reopenErr != nil {
+		// This is bad - we can't reopen the database
+		return nil, fmt.Errorf("CRITICAL: failed to reopen database after reindex: %w", reopenErr)
+	}
+
+	return result, reindexErr
+}
+
+func handleIndexConfig(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
+	getOnly, _ := args["get_only"].(bool)
+	
+	// Build args for the tool
+	configArgs := tools.IndexConfigArgs{
+		GetOnly:     getOnly,
+		ProjectRoot: s.projectRoot,
+		ConfigPath:  s.configPath,
+	}
+
+	// Handle optional arguments
+	if autoReindex, ok := args["auto_reindex"].(bool); ok {
+		configArgs.AutoReindex = &autoReindex
+	}
+	if debounceMs, ok := args["debounce_ms"].(float64); ok {
+		dm := int(debounceMs)
+		configArgs.DebounceMs = &dm
+	}
+	configArgs.ExcludePatterns = extractStringArray(args, "exclude_patterns")
+	configArgs.WatchExtensions = extractStringArray(args, "watch_extensions")
+
+	result, err := tools.IndexConfig(configArgs)
+	
+	// If auto-reindex setting was changed, update the watcher
+	if !getOnly && s.fileWatcher != nil && configArgs.AutoReindex != nil {
+		// Reload config and update watcher
+		reindexConfig := tools.GetAutoReindexConfig(s.configPath)
+		s.fileWatcher.UpdateConfig(reindexConfig)
+		
+		if *configArgs.AutoReindex {
+			if !s.fileWatcher.IsRunning() {
+				if startErr := s.fileWatcher.Start(); startErr != nil {
+					return nil, fmt.Errorf("config saved but failed to start watcher: %w", startErr)
+				}
+			}
+		} else {
+			if s.fileWatcher.IsRunning() {
+				s.fileWatcher.Stop()
+			}
+		}
+	}
+
+	return result, err
 }
 
 func handleGrep(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {

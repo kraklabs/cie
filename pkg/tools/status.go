@@ -64,6 +64,12 @@ func IndexStatus(ctx context.Context, client Querier, pathPattern, projectID, mo
 	header := fmt.Sprintf("# CIE Index Status\n\n**Project:** `%s`\n**Mode:** %s\n\n", projectID, mode)
 	output := header
 
+	// Get indexing state from coordinator
+	indexingStatus := GetIndexingState()
+
+	// Add indexing state section
+	output += formatIndexingState(indexingStatus)
+
 	// Get total counts
 	counts := state.getOverallCounts()
 	output += state.formatOverallStats(counts)
@@ -85,6 +91,58 @@ func IndexStatus(ctx context.Context, client Querier, pathPattern, projectID, mo
 	output += state.formatErrors()
 
 	return NewResult(output), nil
+}
+
+// formatIndexingState formats the indexing state for display.
+func formatIndexingState(status IndexingStatus) string {
+	output := "## Indexing State\n\n"
+
+	// Current status - use state field for more detail
+	switch {
+	case status.IsIndexing:
+		output += "🔄 **Status:** Indexing in progress\n"
+	case status.IsDraining:
+		output += "⏳ **Status:** Draining active queries...\n"
+	case status.IsReopening:
+		output += "📂 **Status:** Reopening database...\n"
+	default:
+		output += "✅ **Status:** Ready\n"
+	}
+	
+	output += fmt.Sprintf("- **State:** %s\n", status.State)
+
+	if status.JobID != "" {
+		output += fmt.Sprintf("- **Job ID:** `%s`\n", status.JobID)
+	}
+	
+	if status.StartedAt != "" {
+		output += fmt.Sprintf("- **Started:** %s\n", status.StartedAt)
+	}
+
+	// Auto-reindex status
+	if status.AutoReindexEnabled {
+		output += "📡 **Auto-reindex:** Enabled\n"
+	} else {
+		output += "📡 **Auto-reindex:** Disabled\n"
+	}
+
+	// Pending changes
+	if status.PendingChanges > 0 {
+		output += fmt.Sprintf("⏳ **Pending Changes:** %d files detected\n", status.PendingChanges)
+	}
+
+	// Last reindex time
+	if status.LastReindexAt != "" {
+		output += fmt.Sprintf("🕐 **Last Reindex:** %s\n", status.LastReindexAt)
+	}
+
+	// Last error
+	if status.LastError != "" {
+		output += fmt.Sprintf("⚠️ **Last Error:** %s\n", status.LastError)
+	}
+
+	output += "\n"
+	return output
 }
 
 type indexCounts struct {

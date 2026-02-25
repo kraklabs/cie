@@ -26,7 +26,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kraklabs/cie/pkg/tools"
+	"github.com/kraklabs/cie/pkg/storage"
 )
 
 // ProjectMeta stores per-project indexing state in CozoDB.
@@ -40,7 +40,7 @@ type ProjectMeta struct {
 
 // GetProjectMeta retrieves the project metadata from CozoDB via Edge Cache.
 // Returns nil (not an error) if the project has no metadata yet.
-func GetProjectMeta(ctx context.Context, client tools.Querier, projectID string) (*ProjectMeta, error) {
+func GetProjectMeta(ctx context.Context, client storage.Querier, projectID string) (*ProjectMeta, error) {
 	script := fmt.Sprintf(
 		`?[last_indexed_sha, last_committed_index, updated_at] :=
 		  *cie_project_meta { project_id, last_indexed_sha, last_committed_index, updated_at },
@@ -68,7 +68,7 @@ func GetProjectMeta(ctx context.Context, client tools.Querier, projectID string)
 
 	meta := &ProjectMeta{
 		ProjectID:      projectID,
-		LastIndexedSHA: tools.AnyToString(row[0]),
+		LastIndexedSHA: storage.AnyToString(row[0]),
 	}
 
 	// Parse last_committed_index
@@ -112,7 +112,7 @@ func BuildSetProjectMetaScript(meta *ProjectMeta) string {
 
 // GetFunctionIDsForFiles retrieves function IDs for the given file paths.
 // Returns a map of file_path -> []function_id.
-func GetFunctionIDsForFiles(ctx context.Context, client tools.Querier, filePaths []string) (map[string][]string, error) {
+func GetFunctionIDsForFiles(ctx context.Context, client storage.Querier, filePaths []string) (map[string][]string, error) {
 	if len(filePaths) == 0 {
 		return make(map[string][]string), nil
 	}
@@ -140,8 +140,8 @@ func GetFunctionIDsForFiles(ctx context.Context, client tools.Querier, filePaths
 		if len(row) < 2 {
 			continue
 		}
-		id := tools.AnyToString(row[0])
-		filePath := tools.AnyToString(row[1])
+		id := storage.AnyToString(row[0])
+		filePath := storage.AnyToString(row[1])
 		byFile[filePath] = append(byFile[filePath], id)
 	}
 
@@ -150,7 +150,7 @@ func GetFunctionIDsForFiles(ctx context.Context, client tools.Querier, filePaths
 
 // GetFileIDsForPaths retrieves file IDs for the given file paths.
 // Returns a map of file_path -> file_id.
-func GetFileIDsForPaths(ctx context.Context, client tools.Querier, filePaths []string) (map[string]string, error) {
+func GetFileIDsForPaths(ctx context.Context, client storage.Querier, filePaths []string) (map[string]string, error) {
 	if len(filePaths) == 0 {
 		return make(map[string]string), nil
 	}
@@ -177,8 +177,8 @@ func GetFileIDsForPaths(ctx context.Context, client tools.Querier, filePaths []s
 		if len(row) < 2 {
 			continue
 		}
-		id := tools.AnyToString(row[0])
-		path := tools.AnyToString(row[1])
+		id := storage.AnyToString(row[0])
+		path := storage.AnyToString(row[1])
 		byPath[path] = id
 	}
 
@@ -195,7 +195,7 @@ type StoredCallsEdge struct {
 
 // GetCallsEdgesForFiles retrieves calls edges where the caller is in one of the given files.
 // Used for cleaning up stale edges when files are deleted or modified.
-func GetCallsEdgesForFiles(ctx context.Context, client tools.Querier, filePaths []string) ([]StoredCallsEdge, error) {
+func GetCallsEdgesForFiles(ctx context.Context, client storage.Querier, filePaths []string) ([]StoredCallsEdge, error) {
 	if len(filePaths) == 0 {
 		return nil, nil
 	}
@@ -226,9 +226,9 @@ func GetCallsEdgesForFiles(ctx context.Context, client tools.Querier, filePaths 
 			continue
 		}
 		edges = append(edges, StoredCallsEdge{
-			ID:       tools.AnyToString(row[0]),
-			CallerID: tools.AnyToString(row[1]),
-			CalleeID: tools.AnyToString(row[2]),
+			ID:       storage.AnyToString(row[0]),
+			CallerID: storage.AnyToString(row[1]),
+			CalleeID: storage.AnyToString(row[2]),
 		})
 	}
 
@@ -236,7 +236,7 @@ func GetCallsEdgesForFiles(ctx context.Context, client tools.Querier, filePaths 
 }
 
 // GetDefinesEdgesForFiles retrieves defines edges (file->function) for the given file paths.
-func GetDefinesEdgesForFiles(ctx context.Context, client tools.Querier, filePaths []string) (map[string][]string, error) {
+func GetDefinesEdgesForFiles(ctx context.Context, client storage.Querier, filePaths []string) (map[string][]string, error) {
 	if len(filePaths) == 0 {
 		return make(map[string][]string), nil
 	}
@@ -274,8 +274,8 @@ func GetDefinesEdgesForFiles(ctx context.Context, client tools.Querier, filePath
 		if len(row) < 3 {
 			continue
 		}
-		definesID := tools.AnyToString(row[0])
-		fileID := tools.AnyToString(row[1])
+		definesID := storage.AnyToString(row[0])
+		fileID := storage.AnyToString(row[1])
 		byFileID[fileID] = append(byFileID[fileID], definesID)
 	}
 
@@ -284,7 +284,7 @@ func GetDefinesEdgesForFiles(ctx context.Context, client tools.Querier, filePath
 
 // GetTypeIDsForFiles retrieves type IDs for the given file paths.
 // Returns a map of file_path -> []type_id.
-func GetTypeIDsForFiles(ctx context.Context, client tools.Querier, filePaths []string) (map[string][]string, error) {
+func GetTypeIDsForFiles(ctx context.Context, client storage.Querier, filePaths []string) (map[string][]string, error) {
 	if len(filePaths) == 0 {
 		return make(map[string][]string), nil
 	}
@@ -311,8 +311,8 @@ func GetTypeIDsForFiles(ctx context.Context, client tools.Querier, filePaths []s
 		if len(row) < 2 {
 			continue
 		}
-		id := tools.AnyToString(row[0])
-		filePath := tools.AnyToString(row[1])
+		id := storage.AnyToString(row[0])
+		filePath := storage.AnyToString(row[1])
 		byFile[filePath] = append(byFile[filePath], id)
 	}
 

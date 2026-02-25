@@ -36,12 +36,21 @@ const (
 
 // Config represents the .cie/project.yaml configuration file.
 type Config struct {
-	Version   string          `yaml:"version"`
-	ProjectID string          `yaml:"project_id"`
-	CIE       CIEConfig       `yaml:"cie"`
-	Embedding EmbeddingConfig `yaml:"embedding"`
-	Indexing  IndexingConfig  `yaml:"indexing"`
-	Roles     RolesConfig     `yaml:"roles,omitempty"` // Custom role patterns
+	Version      string             `yaml:"version"`
+	ProjectID    string             `yaml:"project_id"`
+	CIE          CIEConfig          `yaml:"cie"`
+	Embedding    EmbeddingConfig    `yaml:"embedding"`
+	Indexing     IndexingConfig     `yaml:"indexing"`
+	Roles        RolesConfig        `yaml:"roles,omitempty"`        // Custom role patterns
+	AutoReindex  AutoReindexConfig  `yaml:"auto_reindex,omitempty"` // Auto-reindex configuration
+}
+
+// AutoReindexConfig contains auto-reindex settings for the MCP server.
+type AutoReindexConfig struct {
+	Enabled          bool     `yaml:"enabled"`                      // Enable file watching and auto-reindex
+	DebounceMs       int      `yaml:"debounce_ms,omitempty"`        // Delay before triggering reindex
+	ExcludePatterns  []string `yaml:"exclude_patterns,omitempty"`   // Patterns to exclude from watching
+	WatchExtensions  []string `yaml:"watch_extensions,omitempty"`   // File extensions to watch
 }
 
 // CIEConfig contains CIE server configuration.
@@ -130,6 +139,17 @@ func DefaultConfig(projectID string) *Config {
 				"*.so",
 				"*.dylib",
 				"*.exe",
+			},
+		},
+		AutoReindex: AutoReindexConfig{
+			Enabled:         false,
+			DebounceMs:      2000, // 2 seconds default debounce
+			ExcludePatterns: []string{},
+			WatchExtensions: []string{
+				".go", ".js", ".ts", ".jsx", ".tsx",
+				".py", ".rs", ".java", ".kt", ".scala",
+				".c", ".cpp", ".h", ".hpp",
+				".rb", ".php", ".swift", ".m", ".mm",
 			},
 		},
 	}
