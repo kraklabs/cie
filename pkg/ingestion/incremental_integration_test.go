@@ -101,6 +101,7 @@ func Multiply(a, b int) int {
 			MaxFileSizeBytes:    1048576,
 			ExcludeGlobs:        []string{".git/**"},
 			ForceReindex:        false, // Enable incremental indexing
+			UseGitDelta:         true,  // Используем git для детекции изменений (это git-репозиторий)
 			Concurrency: ConcurrencyConfig{
 				ParseWorkers: 2,
 				EmbedWorkers: 2,
@@ -340,6 +341,7 @@ func main() {
 			MaxFileSizeBytes:    1048576,
 			ExcludeGlobs:        []string{".git/**"},
 			ForceReindex:        false,
+			UseGitDelta:         true, // Используем git для детекции изменений
 			Concurrency: ConcurrencyConfig{
 				ParseWorkers: 2,
 				EmbedWorkers: 2,
@@ -454,6 +456,7 @@ func Helper() {
 			MaxFileSizeBytes:    1048576,
 			ExcludeGlobs:        []string{".git/**"},
 			ForceReindex:        false,
+			UseGitDelta:         true, // Используем git для детекции изменений
 			Concurrency: ConcurrencyConfig{
 				ParseWorkers: 2,
 				EmbedWorkers: 2,
@@ -525,7 +528,8 @@ func main() {
 			EmbeddingDimensions: 384,
 			MaxFileSizeBytes:    1048576,
 			ExcludeGlobs:        []string{".git/**"},
-			ForceReindex:        false, // Try incremental, but should fall back
+			ForceReindex:        false, // Try incremental
+			UseGitDelta:         false, // Non-git repo - use hash-based detection
 			Concurrency: ConcurrencyConfig{
 				ParseWorkers: 2,
 				EmbedWorkers: 2,
@@ -553,18 +557,18 @@ func main() {
 		t.Errorf("expected 1 file processed, got %d", result1.FilesProcessed)
 	}
 
-	// Second run - should also do full indexing (no git = no incremental)
+	// Second run - hash-based detection should find no changes (файлы не менялись)
 	result2, err := pipeline.Run(ctx)
 	if err != nil {
 		t.Fatalf("second run failed: %v", err)
 	}
 
-	// Without git, every run is a full run
-	if result2.FilesProcessed != 1 {
-		t.Errorf("expected 1 file processed (full indexing without git), got %d", result2.FilesProcessed)
+	// С hash-based детекцией, если файлы не менялись — изменений 0
+	if result2.FilesProcessed != 0 {
+		t.Errorf("expected 0 files (no changes detected by hash), got %d", result2.FilesProcessed)
 	}
 
-	t.Log("Non-git repo test passed!")
+	t.Log("Non-git repo with hash-based detection test passed!")
 }
 
 // TestIncrementalIndexing_RenamedFile tests that renamed files are handled correctly.
@@ -604,6 +608,7 @@ func OldFunction() {
 			MaxFileSizeBytes:    1048576,
 			ExcludeGlobs:        []string{".git/**"},
 			ForceReindex:        false,
+			UseGitDelta:         true, // Используем git для детекции изменений
 			Concurrency: ConcurrencyConfig{
 				ParseWorkers: 2,
 				EmbedWorkers: 2,

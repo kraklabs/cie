@@ -25,6 +25,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -49,6 +50,7 @@ type LocalPipeline struct {
 	parser        CodeParser
 	embeddingGen  *EmbeddingGenerator
 	backend       *storage.EmbeddedBackend
+	reuseBackend  bool // Если true, Close() не закрывает backend (используется из MCP).
 	checkpointMgr *CheckpointManager
 	datalogBuild  *DatalogBuilder
 	onProgress    ProgressCallback // Optional callback for progress reporting
@@ -213,6 +215,62 @@ func NewLocalPipeline(config Config, logger *slog.Logger) (*LocalPipeline, error
 		parser:        parser,
 		embeddingGen:  embeddingGen,
 		backend:       backend,
+		reuseBackend:  false,
+		checkpointMgr: checkpointMgr,
+		datalogBuild:  NewDatalogBuilder(),
+	}, nil
+}
+
+// NewLocalPipelineWithBackend создаёт пайплайн, использующий уже открытый backend
+// (например, из MCP). Схема и HNSW не создаются — считаются существующими.
+// Close() не закрывает backend.
+func NewLocalPipelineWithBackend(config Config, logger *slog.Logger, backend *storage.EmbeddedBackend) (*LocalPipeline, error) {
+	if backend == nil {
+		return nil, fmt.Errorf("backend is required")
+	}
+	repoLoader := NewRepoLoader(logger)
+	parserMode := config.IngestionConfig.ParserMode
+	if parserMode == "" {
+		parserMode = ParserModeAuto
+	}
+	var parser CodeParser
+	switch parserMode {
+	case ParserModeSimplified:
+		logger.Info("parser.mode", "mode", "simplified")
+		parser = NewParser(logger)
+	case ParserModeTreeSitter:
+		logger.Info("parser.mode", "mode", "treesitter")
+		parser = NewTreeSitterParser(logger)
+	case ParserModeAuto:
+		tsParser := NewTreeSitterParser(logger)
+		if tsParser != nil {
+			logger.Info("parser.mode", "mode", "treesitter", "selected_by", "auto")
+			parser = tsParser
+		} else {
+			logger.Info("parser.mode", "mode", "simplified", "selected_by", "auto", "reason", "treesitter_unavailable")
+			parser = NewParser(logger)
+		}
+	default:
+		logger.Warn("parser.mode.unknown", "mode", parserMode, "fallback", "treesitter")
+		parser = NewTreeSitterParser(logger)
+	}
+	if config.IngestionConfig.MaxCodeTextBytes > 0 {
+		parser.SetMaxCodeTextSize(config.IngestionConfig.MaxCodeTextBytes)
+	}
+	embeddingProvider, err := CreateEmbeddingProvider(config.IngestionConfig.EmbeddingProvider, logger)
+	if err != nil {
+		return nil, fmt.Errorf("create embedding provider: %w", err)
+	}
+	embeddingGen := NewEmbeddingGenerator(embeddingProvider, config.IngestionConfig.Concurrency.EmbedWorkers, logger)
+	checkpointMgr := NewCheckpointManager(config.IngestionConfig.CheckpointPath)
+	return &LocalPipeline{
+		config:        config,
+		logger:        logger,
+		repoLoader:    repoLoader,
+		parser:        parser,
+		embeddingGen:  embeddingGen,
+		backend:       backend,
+		reuseBackend:  true,
 		checkpointMgr: checkpointMgr,
 		datalogBuild:  NewDatalogBuilder(),
 	}, nil
@@ -238,10 +296,10 @@ func (p *LocalPipeline) FunctionCount() int {
 	return 0
 }
 
-// Close cleans up resources.
+// Close cleans up resources. Не закрывает backend, если пайплайн создан через NewLocalPipelineWithBackend.
 func (p *LocalPipeline) Close() error {
 	var lastErr error
-	if p.backend != nil {
+	if p.backend != nil && !p.reuseBackend {
 		if err := p.backend.Close(); err != nil {
 			lastErr = err
 		}
@@ -474,6 +532,14 @@ func (p *LocalPipeline) Run(ctx context.Context) (*IngestionResult, error) {
 	// Execute mutations
 	if err := p.backend.Execute(ctx, mutations); err != nil {
 		return nil, fmt.Errorf("write to local db: %w", err)
+	}
+
+	// Лог в .cie/index.log для диагностики: по какому файлу можно искать в логе
+	if p.config.IngestionConfig.CheckpointPath != "" {
+		dotCie := filepath.Dir(p.config.IngestionConfig.CheckpointPath)
+		for _, f := range allFiles {
+			AppendIndexLog(dotCie, "indexed "+f.Path)
+		}
 	}
 
 	writeDuration := time.Since(writeStart)
@@ -729,14 +795,28 @@ func (p *LocalPipeline) tryIncrementalRun(ctx context.Context, loadResult *LoadR
 	return p.processIncrementalFiles(ctx, incCtx, changedFiles)
 }
 
-// detectIncrementalChanges checks git state and detects delta.
+// detectIncrementalChanges detects file changes for incremental indexing.
+// Supports both Git-based and hash-based detection (for non-Git VCS).
 // Returns (context, nil, nil) to continue, (nil, result, nil) for early return, or (nil, nil, err) on error.
 func (p *LocalPipeline) detectIncrementalChanges(loadResult *LoadResult, runID string, startTime time.Time) (*incrementalContext, *IngestionResult, error) {
-	deltaDetector := NewDeltaDetector(loadResult.RootPath, p.logger)
-	if !deltaDetector.IsGitRepository() {
-		return nil, nil, fmt.Errorf("not a git repository")
+	// Determine which delta detection method to use
+	useGit := p.config.IngestionConfig.UseGitDelta
+
+	if useGit {
+		// Try Git-based detection first
+		deltaDetector := NewDeltaDetector(loadResult.RootPath, p.logger)
+		if deltaDetector.IsGitRepository() {
+			return p.detectGitChanges(deltaDetector, loadResult, runID, startTime)
+		}
+		p.logger.Info("local.ingestion.git_unavailable", "msg", "falling back to hash-based detection")
 	}
 
+	// Use hash-based detection (works with any VCS or no VCS)
+	return p.detectHashChanges(loadResult, runID, startTime)
+}
+
+// detectGitChanges uses Git to detect changes between commits.
+func (p *LocalPipeline) detectGitChanges(deltaDetector *DeltaDetector, loadResult *LoadResult, runID string, startTime time.Time) (*incrementalContext, *IngestionResult, error) {
 	lastSHA, err := p.backend.GetLastIndexedSHA()
 	if err != nil {
 		return nil, nil, fmt.Errorf("get last indexed SHA: %w", err)
@@ -750,8 +830,14 @@ func (p *LocalPipeline) detectIncrementalChanges(loadResult *LoadResult, runID s
 		return nil, nil, fmt.Errorf("get HEAD SHA: %w", err)
 	}
 
-	// No changes?
-	if headSHA == lastSHA {
+	// Проверяем untracked файлы ДО проверки headSHA == lastSHA
+	untrackedFiles, untrackedErr := deltaDetector.DetectUntrackedFiles()
+	if untrackedErr != nil {
+		p.logger.Warn("local.ingestion.incremental.untracked_error", "err", untrackedErr)
+	}
+
+	// No changes (в git)? Проверяем есть ли untracked файлы
+	if headSHA == lastSHA && len(untrackedFiles) == 0 {
 		p.logger.Info("local.ingestion.incremental.no_changes", "sha", headSHA[:min(8, len(headSHA))])
 		return nil, &IngestionResult{
 			ProjectID:     p.config.ProjectID,
@@ -768,6 +854,13 @@ func (p *LocalPipeline) detectIncrementalChanges(loadResult *LoadResult, runID s
 	delta, err := deltaDetector.DetectDelta(lastSHA, headSHA)
 	if err != nil {
 		return nil, nil, fmt.Errorf("detect delta: %w", err)
+	}
+
+	// Добавляем untracked файлы в дельту
+	if len(untrackedFiles) > 0 {
+		p.logger.Info("local.ingestion.incremental.untracked", "count", len(untrackedFiles), "first", untrackedFiles[0])
+		delta.Added = append(delta.Added, untrackedFiles...)
+		rebuildAllList(delta)
 	}
 
 	delta = FilterDelta(delta, p.config.IngestionConfig.ExcludeGlobs, p.config.IngestionConfig.MaxFileSizeBytes, loadResult.RootPath)
@@ -799,6 +892,49 @@ func (p *LocalPipeline) detectIncrementalChanges(loadResult *LoadResult, runID s
 	}, nil, nil
 }
 
+// detectHashChanges uses content hashes to detect changes (no Git required).
+func (p *LocalPipeline) detectHashChanges(loadResult *LoadResult, runID string, startTime time.Time) (*incrementalContext, *IngestionResult, error) {
+	p.logger.Info("local.ingestion.hash_based_detection")
+
+	hashDetector := NewHashDeltaDetector(loadResult.RootPath, p.backend, p.logger)
+	if !hashDetector.IsAvailable() {
+		return nil, nil, fmt.Errorf("backend not available for hash-based detection")
+	}
+
+	ctx := context.Background()
+	delta, err := hashDetector.DetectChanges(ctx, loadResult.Files)
+	if err != nil {
+		return nil, nil, fmt.Errorf("detect hash changes: %w", err)
+	}
+
+	delta = FilterDelta(delta, p.config.IngestionConfig.ExcludeGlobs, p.config.IngestionConfig.MaxFileSizeBytes, loadResult.RootPath)
+
+	if !delta.HasChanges() {
+		p.logger.Info("local.ingestion.hash_based.no_changes")
+		return nil, &IngestionResult{
+			ProjectID:     p.config.ProjectID,
+			RunID:         runID,
+			TotalDuration: time.Since(startTime),
+		}, nil
+	}
+
+	p.logger.Info("local.ingestion.hash_based.mode",
+		"added", len(delta.Added),
+		"modified", len(delta.Modified),
+		"deleted", len(delta.Deleted),
+	)
+
+	// For hash-based detection, we use a synthetic SHA (timestamp-based)
+	headSHA := fmt.Sprintf("hash:%d", startTime.Unix())
+
+	return &incrementalContext{
+		runID:     runID,
+		startTime: startTime,
+		headSHA:   headSHA,
+		delta:     delta,
+	}, nil, nil
+}
+
 // processIncrementalDeletions deletes entities for removed/modified files.
 func (p *LocalPipeline) processIncrementalDeletions(delta *GitDelta) {
 	filesToDelete := append([]string{}, delta.Deleted...)
@@ -807,9 +943,16 @@ func (p *LocalPipeline) processIncrementalDeletions(delta *GitDelta) {
 		filesToDelete = append(filesToDelete, oldPath)
 	}
 
+	dotCie := ""
+	if p.config.IngestionConfig.CheckpointPath != "" {
+		dotCie = filepath.Dir(p.config.IngestionConfig.CheckpointPath)
+	}
 	for _, filePath := range filesToDelete {
 		if err := p.backend.DeleteEntitiesForFile(filePath); err != nil {
 			p.logger.Warn("local.ingestion.incremental.delete.error", "path", filePath, "err", err)
+		}
+		if dotCie != "" {
+			AppendIndexLog(dotCie, "deleted "+filePath)
 		}
 	}
 }
@@ -923,6 +1066,13 @@ func (p *LocalPipeline) processIncrementalFiles(ctx context.Context, incCtx *inc
 		return nil, fmt.Errorf("write to local db: %w", err)
 	}
 	writeDuration := time.Since(writeStart)
+
+	if p.config.IngestionConfig.CheckpointPath != "" {
+		dotCie := filepath.Dir(p.config.IngestionConfig.CheckpointPath)
+		for _, f := range parseResult.files {
+			AppendIndexLog(dotCie, "indexed "+f.Path)
+		}
+	}
 
 	// Update SHA
 	if err := p.backend.SetLastIndexedSHA(incCtx.headSHA); err != nil {

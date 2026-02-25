@@ -316,6 +316,29 @@ func (dd *DeltaDetector) IsGitRepository() bool {
 	return err == nil
 }
 
+// DetectUntrackedFiles возвращает список untracked файлов (не в git index, но есть на диске).
+// Использует `git ls-files --others --exclude-standard`.
+func (dd *DeltaDetector) DetectUntrackedFiles() ([]string, error) {
+	cmd := exec.Command("git", "ls-files", "--others", "--exclude-standard")
+	cmd.Dir = dd.repoPath
+	output, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return nil, fmt.Errorf("git ls-files failed: %s", string(exitErr.Stderr))
+		}
+		return nil, fmt.Errorf("git ls-files: %w", err)
+	}
+	var files []string
+	scanner := bufio.NewScanner(bytes.NewReader(output))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" {
+			files = append(files, line)
+		}
+	}
+	return files, scanner.Err()
+}
+
 // =============================================================================
 // DELTA FILTERING
 // =============================================================================

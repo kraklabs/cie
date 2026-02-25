@@ -228,36 +228,13 @@ func runLocalIndex(ctx context.Context, logger *slog.Logger, cfg *Config, config
 		), false)
 	}
 
-	// Combine default excludes with user-specified ones
-	defaults := ingestion.DefaultConfig()
-	excludeGlobs := append(defaults.ExcludeGlobs, cfg.Indexing.Exclude...)
-
-	config := ingestion.Config{
-		ProjectID: cfg.ProjectID,
-		RepoSource: ingestion.RepoSource{
-			Type:  "local_path",
-			Value: repoPath,
-		},
-		IngestionConfig: ingestion.IngestionConfig{
-			ParserMode:           ingestion.ParserMode(cfg.Indexing.ParserMode),
-			EmbeddingProvider:    embeddingProvider,
-			EmbeddingDimensions:  cfg.Embedding.Dimensions,
-			BatchTargetMutations: cfg.Indexing.BatchTarget,
-			MaxFileSizeBytes:     cfg.Indexing.MaxFileSize,
-			CheckpointPath:       checkpointDir,
-			LocalDataDir:         dataDir,
-			LocalEngine:          "rocksdb",
-			ExcludeGlobs:         excludeGlobs,
-			ForceReindex:         forceReindex,
-			Concurrency: ingestion.ConcurrencyConfig{
-				ParseWorkers: 4,
-				EmbedWorkers: embedWorkers,
-			},
-		},
+	ingestionConfig, embedProviderOut := BuildIngestionConfig(cfg, repoPath, dataDir, checkpointDir, forceReindex, embedWorkers)
+	if embeddingProvider != "" {
+		embedProviderOut = embeddingProvider
 	}
 
 	// Set embedding environment based on provider
-	switch embeddingProvider {
+	switch embedProviderOut {
 	case "ollama":
 		_ = os.Setenv("OLLAMA_BASE_URL", cfg.Embedding.BaseURL)
 		_ = os.Setenv("OLLAMA_EMBED_MODEL", cfg.Embedding.Model)
@@ -269,7 +246,7 @@ func runLocalIndex(ctx context.Context, logger *slog.Logger, cfg *Config, config
 		}
 	}
 
-	pipeline, err := ingestion.NewLocalPipeline(config, logger)
+	pipeline, err := ingestion.NewLocalPipeline(ingestionConfig, logger)
 	if err != nil {
 		errors.FatalError(errors.NewDatabaseError(
 			"Cannot initialize indexing pipeline",

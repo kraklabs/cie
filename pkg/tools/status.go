@@ -22,6 +22,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // indexStatusState holds state for index status queries.
@@ -58,7 +59,8 @@ func (s *indexStatusState) countEntities(name, countQuery, listQuery string) int
 
 // IndexStatus shows the indexing status for the project or a specific path.
 // projectID and mode are used for display purposes in the output header.
-func IndexStatus(ctx context.Context, client Querier, pathPattern, projectID, mode string) (*ToolResult, error) {
+// filePath: если не пустой, добавляется секция "по файлу" — в индексе ли файл, число функций и эмбеддингов (для диагностики).
+func IndexStatus(ctx context.Context, client Querier, pathPattern, filePath, projectID, mode string) (*ToolResult, error) {
 	state := &indexStatusState{ctx: ctx, client: client}
 
 	header := fmt.Sprintf("# CIE Index Status\n\n**Project:** `%s`\n**Mode:** %s\n\n", projectID, mode)
@@ -71,6 +73,10 @@ func IndexStatus(ctx context.Context, client Querier, pathPattern, projectID, mo
 	// Check for empty index
 	if counts.files == 0 && counts.functions == 0 {
 		output += formatEmptyIndexHelp()
+		if filePath != "" {
+			output += state.formatFileStatus(filePath)
+		}
+		output += state.formatErrors()
 		return NewResult(output), nil
 	}
 
@@ -79,6 +85,11 @@ func IndexStatus(ctx context.Context, client Querier, pathPattern, projectID, mo
 		output += state.formatPathStats(pathPattern, counts)
 	} else {
 		output += state.formatOverallBreakdown()
+	}
+
+	// Диагностика по одному файлу (проиндексирован ли, есть ли эмбеддинги)
+	if filePath != "" {
+		output += state.formatFileStatus(filePath)
 	}
 
 	// Add errors if any
@@ -162,6 +173,32 @@ func (s *indexStatusState) formatSampleFiles(pathPattern string) string {
 		}
 		output += fmt.Sprintf("- `%s`\n", row[0])
 	}
+	return output
+}
+
+// formatFileStatus выводит секцию «по одному файлу»: в индексе ли путь, число функций и эмбеддингов (для диагностики).
+func (s *indexStatusState) formatFileStatus(filePath string) string {
+	// Экранируем путь для вставки в CozoScript: кавычки и обратные слэши
+	escaped := strings.ReplaceAll(filePath, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+	pathLiteral := `"` + escaped + `"`
+	output := fmt.Sprintf("\n## File: `%s`\n", filePath)
+	// Проверяем наличие файла в cie_file (точное совпадение path)
+	fileRow := s.runQuery("file by path", fmt.Sprintf(`?[path] := *cie_file { path }, path == %s :limit 1`, pathLiteral))
+	if fileRow == nil || len(fileRow.Rows) == 0 {
+		output += "- **In index:** no\n"
+		output += "\n_Файл не найден в индексе. Возможные причины: не индексировался, исключён правилами, или путь задан неверно._\n"
+		return output
+	}
+	output += "- **In index:** yes\n"
+	funcCount := s.countEntities("file functions", fmt.Sprintf(`?[count(f)] := *cie_function { id: f, file_path }, file_path == %s`, pathLiteral), fmt.Sprintf(`?[id] := *cie_function { id, file_path }, file_path == %s :limit 10000`, pathLiteral))
+	embCount := s.countEntities("file embeddings", fmt.Sprintf(`?[count(f)] := *cie_function { id: f, file_path }, file_path == %s, *cie_function_embedding { function_id: f }`, pathLiteral), fmt.Sprintf(`?[function_id] := *cie_function { id: function_id, file_path }, file_path == %s, *cie_function_embedding { function_id } :limit 10000`, pathLiteral))
+	output += fmt.Sprintf("- **Functions:** %d\n", funcCount)
+	output += fmt.Sprintf("- **With embeddings:** %d", embCount)
+	if funcCount > 0 {
+		output += fmt.Sprintf(" (%.0f%%)", float64(embCount)/float64(funcCount)*100)
+	}
+	output += "\n"
 	return output
 }
 

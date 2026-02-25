@@ -24,13 +24,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/kraklabs/cie/internal/errors"
+	"github.com/kraklabs/cie/pkg/ingestion"
 	"github.com/kraklabs/cie/pkg/storage"
 	"github.com/kraklabs/cie/pkg/tools"
 )
@@ -65,6 +69,7 @@ All CIE tool queries MUST be in English. The keyword boost algorithm matches que
 | Find type/interface/struct | cie_find_type | name="UserService" |
 | Explore directory structure | cie_directory_summary | path="internal/cie" |
 | Check index health | cie_index_status | (no args = check entire index) |
+| Reindex project (no IDE restart) | cie_reindex | force_full=false for incremental |
 | Function git commit history | cie_function_history | function_name="HandleAuth" |
 | Find when code was introduced | cie_find_introduction | code_snippet="jwt.Generate()" |
 | Function code ownership/blame | cie_blame_function | function_name="Parse" |
@@ -279,6 +284,18 @@ type mcpContent struct {
 // Holds the CIE client for database queries, embedding configuration for
 // semantic search, custom role patterns from the project configuration,
 // and git executor for git history tools.
+// reindexState хранит состояние фоновой реиндексации (только для embedded режима).
+type reindexState struct {
+	mu         sync.RWMutex
+	inProgress bool
+	startedAt  time.Time
+	phase      string
+	current    int64
+	total      int64
+	lastErr    error
+	lastResult *ingestion.IngestionResult
+}
+
 type mcpServer struct {
 	client         tools.Querier
 	projectID      string // Project ID for error messages
@@ -287,6 +304,12 @@ type mcpServer struct {
 	embeddingModel string
 	customRoles    map[string]RolePattern // Custom role patterns from config
 	gitExecutor    tools.GitRunner        // Git executor for history tools (may be nil)
+	// Для embedded: реиндекс и конфиг
+	backend    *storage.EmbeddedBackend
+	cfg        *Config
+	configPath string
+	repoPath   string
+	reindex    reindexState
 }
 
 // runMCPServer starts the CIE Model Context Protocol server.
@@ -324,9 +347,26 @@ func runMCPServer(configPath string) {
 	fmt.Fprintf(os.Stderr, "Config path arg: %q\n", configPath)
 
 	cfg := loadMCPConfig(configPath)
-	client, mode, projectID := setupMCPClient(cfg, configPath)
+	client, backend, mode, projectID := setupMCPClient(cfg, configPath)
 
 	fmt.Fprintf(os.Stderr, "  Embedding configured: %s (%s)\n", cfg.Embedding.BaseURL, cfg.Embedding.Model)
+
+	// Путь к конфигу и к корню репо (для реиндекса в embedded режиме)
+	resolvedConfigPath := configPath
+	if resolvedConfigPath == "" {
+		if p, err := findConfigFile(); err == nil {
+			resolvedConfigPath = p
+		}
+	}
+	if resolvedConfigPath != "" {
+		if abs, err := filepath.Abs(resolvedConfigPath); err == nil {
+			resolvedConfigPath = abs
+		}
+	}
+	repoPath := ""
+	if resolvedConfigPath != "" {
+		repoPath = filepath.Dir(filepath.Dir(resolvedConfigPath)) // .cie/project.yaml -> repo
+	}
 
 	server := &mcpServer{
 		client:         client,
@@ -335,9 +375,24 @@ func runMCPServer(configPath string) {
 		embeddingURL:   cfg.Embedding.BaseURL,
 		embeddingModel: cfg.Embedding.Model,
 		customRoles:    cfg.Roles.Custom,
+		backend:        backend,
+		cfg:            cfg,
+		configPath:     resolvedConfigPath,
+		repoPath:       repoPath,
 	}
 
 	setupGitExecutor(server, configPath, cwd)
+
+	if cfg.Indexing.Watch && backend != nil && repoPath != "" {
+		go runWatchAndReindex(server)
+		fmt.Fprintf(os.Stderr, "  Watch: enabled (reindex on file change)\n")
+	}
+
+	// Создаём .cie/index.log при старте, чтобы пользователь видел файл и путь к логу
+	if repoPath != "" {
+		ingestion.AppendIndexLog(filepath.Join(repoPath, ".cie"), "mcp server started")
+		fmt.Fprintf(os.Stderr, "  Index log: %s\n", filepath.Join(repoPath, ".cie", "index.log"))
+	}
 
 	fmt.Fprintf(os.Stderr, "CIE MCP Server v%s starting (%s mode)...\n", mcpVersion, server.mode)
 	if server.mode == "remote" {
@@ -370,7 +425,8 @@ func loadMCPConfig(configPath string) *Config {
 }
 
 // setupMCPClient creates the appropriate Querier based on config (embedded vs remote).
-func setupMCPClient(cfg *Config, configPath string) (tools.Querier, string, string) {
+// При embedded возвращает также *storage.EmbeddedBackend для реиндекса; при remote — nil.
+func setupMCPClient(cfg *Config, configPath string) (tools.Querier, *storage.EmbeddedBackend, string, string) {
 	// Warn if CIE_BASE_URL env var is overriding the config
 	if envURL := os.Getenv("CIE_BASE_URL"); envURL != "" && cfg.CIE.EdgeCache == envURL {
 		fmt.Fprintf(os.Stderr, "Note: CIE_BASE_URL=%s is set, using remote mode. Unset it for embedded mode.\n", envURL)
@@ -387,8 +443,8 @@ func setupMCPClient(cfg *Config, configPath string) (tools.Querier, string, stri
 	return setupRemoteClient(cfg, configPath)
 }
 
-// setupEmbeddedClient opens a local CozoDB backend and returns an EmbeddedQuerier.
-func setupEmbeddedClient(cfg *Config, configPath, title, detail, suggestion, mode string) (tools.Querier, string, string) {
+// setupEmbeddedClient opens a local CozoDB backend and returns an EmbeddedQuerier and the backend.
+func setupEmbeddedClient(cfg *Config, configPath, title, detail, suggestion, mode string) (tools.Querier, *storage.EmbeddedBackend, string, string) {
 	dataDir, err := projectDataDir(cfg, configPath)
 	if err != nil {
 		errors.FatalError(err, false)
@@ -411,16 +467,16 @@ func setupEmbeddedClient(cfg *Config, configPath, title, detail, suggestion, mod
 		_ = backend.Close()
 		os.Exit(0)
 	}()
-	return tools.NewEmbeddedQuerier(backend), mode, cfg.ProjectID
+	return tools.NewEmbeddedQuerier(backend), backend, mode, cfg.ProjectID
 }
 
 // setupRemoteClient configures a remote HTTP client with auto-fallback to embedded mode.
-func setupRemoteClient(cfg *Config, configPath string) (tools.Querier, string, string) {
+func setupRemoteClient(cfg *Config, configPath string) (tools.Querier, *storage.EmbeddedBackend, string, string) {
 	httpClient := tools.NewCIEClient(cfg.CIE.EdgeCache, cfg.ProjectID)
 
 	if isReachable(cfg.CIE.EdgeCache) {
 		httpClient.SetEmbeddingConfig(cfg.Embedding.BaseURL, cfg.Embedding.Model)
-		return httpClient, "remote", cfg.ProjectID
+		return httpClient, nil, "remote", cfg.ProjectID
 	}
 
 	// Remote unreachable — try local fallback
@@ -438,7 +494,7 @@ func setupRemoteClient(cfg *Config, configPath string) (tools.Querier, string, s
 	fmt.Fprintf(os.Stderr, "Warning: Edge Cache at %s is not reachable and no local data found.\n", cfg.CIE.EdgeCache)
 	fmt.Fprintf(os.Stderr, "  Run 'cie init --force -y && cie index' to set up local mode.\n")
 	httpClient.SetEmbeddingConfig(cfg.Embedding.BaseURL, cfg.Embedding.Model)
-	return httpClient, "remote (unreachable)", cfg.ProjectID
+	return httpClient, nil, "remote (unreachable)", cfg.ProjectID
 }
 
 // setupGitExecutor initializes the git executor for git history tools.
@@ -520,13 +576,31 @@ func (s *mcpServer) getTools() []mcpTool {
 	return []mcpTool{
 		{
 			Name:        "cie_index_status",
-			Description: "Check the indexing status for a path. Shows how many files and functions are indexed, and warns if the index appears incomplete. Use this FIRST when searches return no results to verify the path is indexed.",
+			Description: "Check the indexing status for a path. Shows how many files and functions are indexed, and warns if the index appears incomplete. Use this FIRST when searches return no results to verify the path is indexed. When reindex is running, also shows in_progress and elapsed time. Use file_path to check if a single file is indexed (diagnostics).",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"path_pattern": map[string]any{
 						"type":        "string",
 						"description": "Path pattern to check (e.g., 'apps/gateway' or 'internal/'). Leave empty to check entire index.",
+					},
+					"file_path": map[string]any{
+						"type":        "string",
+						"description": "Exact file path to check (e.g. 'pkg/foo.go'). Adds a section showing whether the file is in the index and how many functions/embeddings it has. For diagnostics.",
+					},
+				},
+				"required": []string{},
+			},
+		},
+		{
+			Name:        "cie_reindex",
+			Description: "Start or check background reindexing of the project. Use when you've changed code and want the index updated without closing the IDE. If reindex is already running, returns status (in_progress, started_at, elapsed, phase). Only available in embedded MCP mode.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"force_full": map[string]any{
+						"type":        "boolean",
+						"description": "If true, force full reindex; otherwise incremental (default: false).",
 					},
 				},
 				"required": []string{},
@@ -1203,6 +1277,7 @@ var toolHandlers = map[string]toolHandler{
 	"cie_analyze":                handleAnalyze,
 	"cie_find_type":              handleFindType,
 	"cie_index_status":           handleIndexStatus,
+	"cie_reindex":                handleReindex,
 	"cie_grep":                   handleGrep,
 	"cie_verify_absence":         handleVerifyAbsence,
 	"cie_list_services":          handleListServices,
@@ -1398,7 +1473,184 @@ func handleFindType(ctx context.Context, s *mcpServer, args map[string]any) (*to
 
 func handleIndexStatus(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
 	pathPattern, _ := args["path_pattern"].(string)
-	return tools.IndexStatus(ctx, s.client, pathPattern, s.projectID, s.mode)
+	filePath, _ := args["file_path"].(string)
+	result, err := tools.IndexStatus(ctx, s.client, pathPattern, filePath, s.projectID, s.mode)
+	if err != nil {
+		return result, err
+	}
+	// В embedded режиме добавляем блок о реиндексации, если идёт или была недавно
+	if s.backend != nil {
+		s.reindex.mu.RLock()
+		inProgress := s.reindex.inProgress
+		startedAt := s.reindex.startedAt
+		phase := s.reindex.phase
+		current := s.reindex.current
+		total := s.reindex.total
+		lastErr := s.reindex.lastErr
+		lastResult := s.reindex.lastResult
+		s.reindex.mu.RUnlock()
+		result.Text += formatReindexStatusSection(inProgress, startedAt, phase, current, total, lastErr, lastResult)
+	}
+	return result, nil
+}
+
+// formatReindexStatusSection форматирует блок статуса реиндексации для вывода в cie_index_status.
+func formatReindexStatusSection(inProgress bool, startedAt time.Time, phase string, current, total int64, lastErr error, lastResult *ingestion.IngestionResult) string {
+	if !inProgress && lastResult == nil && lastErr == nil {
+		return ""
+	}
+	out := "\n\n## Reindex\n"
+	if inProgress {
+		elapsed := time.Since(startedAt).Round(time.Second)
+		out += fmt.Sprintf("- **Status:** in_progress\n")
+		out += fmt.Sprintf("- **Started at:** %s\n", startedAt.Format(time.RFC3339))
+		out += fmt.Sprintf("- **Elapsed:** %s\n", elapsed)
+		out += fmt.Sprintf("- **Phase:** %s\n", phase)
+		if total > 0 {
+			out += fmt.Sprintf("- **Progress:** %d / %d\n", current, total)
+		}
+	} else if lastErr != nil {
+		out += fmt.Sprintf("- **Last run:** error — %s\n", lastErr.Error())
+	} else if lastResult != nil {
+		out += fmt.Sprintf("- **Last run:** completed — %d files, %d functions, %s\n",
+			lastResult.FilesProcessed, lastResult.FunctionsExtracted, lastResult.TotalDuration.Round(time.Millisecond))
+	}
+	return out
+}
+
+func handleReindex(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {
+	if s.mode != "embedded" || s.backend == nil {
+		return tools.NewResult("**cie_reindex** is only available in embedded MCP mode (local database). When using a remote Edge Cache, run `cie index` in a terminal."), nil
+	}
+	forceFull, _ := args["force_full"].(bool)
+
+	s.reindex.mu.RLock()
+	inProgress := s.reindex.inProgress
+	startedAt := s.reindex.startedAt
+	phase := s.reindex.phase
+	current := s.reindex.current
+	total := s.reindex.total
+	s.reindex.mu.RUnlock()
+
+	if inProgress {
+		elapsed := time.Since(startedAt).Round(time.Second)
+		msg := fmt.Sprintf("# Reindex status: in_progress\n\n- **Started at:** %s\n- **Elapsed:** %s\n- **Phase:** %s\n", startedAt.Format(time.RFC3339), elapsed, phase)
+		if total > 0 {
+			msg += fmt.Sprintf("- **Progress:** %d / %d\n", current, total)
+		}
+		msg += "\nCall `cie_reindex` again after it finishes to start a new run, or use `cie_index_status` to see when it completes."
+		return tools.NewResult(msg), nil
+	}
+
+	if !tryStartReindex(s, forceFull) {
+		return tools.NewResult("# Reindex already started by another request."), nil
+	}
+	s.reindex.mu.RLock()
+	startedAt = s.reindex.startedAt
+	s.reindex.mu.RUnlock()
+	msg := fmt.Sprintf("# Reindex started\n\n- **Started at:** %s\n- **Mode:** incremental (only changed files). Use `force_full: true` for full reindex.\n- Check status with `cie_index_status` or call `cie_reindex` again to see progress.", startedAt.Format(time.RFC3339))
+	if forceFull {
+		msg = fmt.Sprintf("# Reindex started (full)\n\n- **Started at:** %s\n- **Mode:** full reindex.\n- Check status with `cie_index_status` or call `cie_reindex` again to see progress.", startedAt.Format(time.RFC3339))
+	}
+	return tools.NewResult(msg), nil
+}
+
+// runReindexGoroutine выполняет реиндексацию в фоне и обновляет состояние на сервере.
+func runReindexGoroutine(s *mcpServer, forceFull bool) {
+	defer func() {
+		s.reindex.mu.Lock()
+		s.reindex.inProgress = false
+		s.reindex.mu.Unlock()
+	}()
+
+	dotCie := ""
+	if s.repoPath != "" {
+		dotCie = filepath.Join(s.repoPath, ".cie")
+	}
+	mode := "incremental"
+	if forceFull {
+		mode = "full"
+	}
+	if dotCie != "" {
+		ingestion.AppendIndexLog(dotCie, "reindex started ("+mode+")")
+	}
+
+	cfg, checkpointDir, embedProvider, err := buildReindexConfig(s, forceFull)
+	if err != nil {
+		s.reindex.mu.Lock()
+		s.reindex.lastErr = err
+		s.reindex.mu.Unlock()
+		if dotCie != "" {
+			ingestion.AppendIndexLog(dotCie, "reindex failed: "+err.Error())
+		}
+		return
+	}
+	if err := os.MkdirAll(checkpointDir, 0750); err != nil {
+		s.reindex.mu.Lock()
+		s.reindex.lastErr = fmt.Errorf("create checkpoint dir: %w", err)
+		s.reindex.mu.Unlock()
+		return
+	}
+
+	// Переменные окружения для эмбеддингов (как в cie index)
+	switch embedProvider {
+	case "ollama":
+		_ = os.Setenv("OLLAMA_BASE_URL", s.cfg.Embedding.BaseURL)
+		_ = os.Setenv("OLLAMA_EMBED_MODEL", s.cfg.Embedding.Model)
+	case "openai":
+		_ = os.Setenv("OPENAI_API_BASE", s.cfg.Embedding.BaseURL)
+		_ = os.Setenv("OPENAI_EMBED_MODEL", s.cfg.Embedding.Model)
+		if s.cfg.Embedding.APIKey != "" {
+			_ = os.Setenv("OPENAI_API_KEY", s.cfg.Embedding.APIKey)
+		}
+	}
+
+	logger := slog.Default()
+	pipeline, err := ingestion.NewLocalPipelineWithBackend(cfg, logger, s.backend)
+	if err != nil {
+		s.reindex.mu.Lock()
+		s.reindex.lastErr = err
+		s.reindex.mu.Unlock()
+		return
+	}
+	defer func() { _ = pipeline.Close() }()
+
+	pipeline.SetProgressCallback(func(current, total int64, phase string) {
+		s.reindex.mu.Lock()
+		s.reindex.phase = phase
+		s.reindex.current = current
+		s.reindex.total = total
+		s.reindex.mu.Unlock()
+	})
+
+	runCtx := context.Background()
+	result, err := pipeline.Run(runCtx)
+	s.reindex.mu.Lock()
+	s.reindex.lastErr = err
+	s.reindex.lastResult = result
+	s.reindex.mu.Unlock()
+	if dotCie != "" {
+		if err != nil {
+			ingestion.AppendIndexLog(dotCie, "reindex failed: "+err.Error())
+		} else {
+			ingestion.AppendIndexLog(dotCie, fmt.Sprintf("reindex completed files=%d", result.FilesProcessed))
+		}
+	}
+}
+
+// buildReindexConfig собирает конфиг пайплайна и возвращает checkpointDir и embedding provider.
+// Использует общую BuildIngestionConfig (как и cie index).
+func buildReindexConfig(s *mcpServer, forceFull bool) (ingestion.Config, string, string, error) {
+	if s.repoPath == "" || s.cfg == nil {
+		return ingestion.Config{}, "", "", fmt.Errorf("repo path or config missing (config path: %s)", s.configPath)
+	}
+	checkpointDir := filepath.Join(s.repoPath, ".cie", "checkpoints")
+	dataDir, err := projectDataDir(s.cfg, s.configPath)
+	if err != nil {
+		return ingestion.Config{}, "", "", err
+	}
+	cfg, embedProvider := BuildIngestionConfig(s.cfg, s.repoPath, dataDir, checkpointDir, forceFull, 8)
+	return cfg, checkpointDir, embedProvider, nil
 }
 
 func handleGrep(ctx context.Context, s *mcpServer, args map[string]any) (*tools.ToolResult, error) {

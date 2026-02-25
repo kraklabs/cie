@@ -66,6 +66,8 @@ type IndexingConfig struct {
 	MaxFileSize  int64    `yaml:"max_file_size"`            // bytes
 	Exclude      []string `yaml:"exclude"`                  // glob patterns
 	LocalDataDir string   `yaml:"local_data_dir,omitempty"` // custom data root (project dir appended)
+	Watch        bool     `yaml:"watch"`                    // при MCP: следить за изменениями файлов и запускать реиндекс (только embedded, macOS/Linux)
+	UseGit       bool     `yaml:"use_git"`                  // true = use git diff для инкрементальной индексации (по умолчанию), false = использовать хеши файлов (работает без git)
 }
 
 // RolesConfig contains custom role pattern definitions.
@@ -120,6 +122,7 @@ func DefaultConfig(projectID string) *Config {
 			ParserMode:  "auto",
 			BatchTarget: 500,     // Smaller batches for stability over slow networks
 			MaxFileSize: 1048576, // 1MB
+			UseGit:      true,    // По умолчанию используем git для инкрементальной индексации
 			Exclude: []string{
 				".git/**",
 				"node_modules/**",

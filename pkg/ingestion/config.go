@@ -124,6 +124,12 @@ type IngestionConfig struct {
 	// ensuring idempotent re-runs that skip already-committed batches.
 	ForceReindex bool
 
+	// UseGitDelta controls whether to use Git for incremental change detection.
+	// When true (default): uses git diff between commits (fast, VCS-native).
+	// When false: uses content hash comparison (works with any VCS or no VCS).
+	// Hash-based detection is useful for non-Git repositories or when Git is unavailable.
+	UseGitDelta bool
+
 	// === LOCAL MODE (Standalone/Open-Source) ===
 
 	// LocalDataDir is the directory where local CozoDB stores its data.
@@ -188,6 +194,7 @@ func DefaultConfig() IngestionConfig {
 		BatchTargetMutations: 2000,           // Increased for fewer replication log entries (reduces edge CPU usage)
 		MaxFileSizeBytes:     1048576,        // 1MB
 		MaxCodeTextBytes:     102400,         // 100KB (balance between coverage and performance)
+		UseGitDelta:          true,           // Use Git for incremental detection by default
 		ExcludeGlobs: []string{
 			// Version control
 			".git/**",

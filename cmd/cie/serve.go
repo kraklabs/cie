@@ -497,6 +497,7 @@ func (s *cieServer) runIndexJob(job *indexJob, projectID, repoPath string, full 
 			ExcludeGlobs:         defaults.ExcludeGlobs,
 			LocalDataDir:         dbPath, // Use full path including project ID
 			LocalEngine:          "rocksdb",
+			UseGitDelta:          true, // По умолчанию используем git
 			Concurrency: ingestion.ConcurrencyConfig{
 				ParseWorkers: 4,
 				EmbedWorkers: 8,
